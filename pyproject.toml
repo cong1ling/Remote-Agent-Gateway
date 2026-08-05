@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "remote-agent-gateway"
+version = "0.1.0"
+description = "A self-hosted MCP gateway for lightweight outbound remote agents"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.109,<1",
+    "mcp>=1.29,<2",
+    "python-multipart>=0.0.9,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "websockets>=14,<18",
+]
+
+[project.scripts]
+remote-gateway = "gateway.__main__:main"
+remote-agent = "agent:main"
+
+[tool.setuptools]
+py-modules = ["agent"]
+
+[tool.setuptools.packages.find]
+include = ["gateway*"]
+
+[tool.setuptools.package-data]
+gateway = ["static/*"]
+
