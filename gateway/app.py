@@ -56,6 +56,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.mcp_server = mcp_server
     app.include_router(create_web_router(db, settings, hub))
 
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; "
+            "style-src 'self'; script-src 'self'; frame-ancestors 'none'; "
+            "base-uri 'none'; form-action 'self'"
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
+
     @app.websocket("/ws/agent")
     async def agent_socket(websocket: WebSocket) -> None:
         await handle_agent_websocket(websocket, db, hub)

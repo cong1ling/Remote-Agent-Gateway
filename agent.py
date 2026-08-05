@@ -20,6 +20,8 @@ PROTOCOL_VERSION = 1
 SUPPORTED_PROFILES = ["shell.v1"]
 RECONNECT_MIN_SECONDS = 2
 RECONNECT_MAX_SECONDS = 30
+MAX_CAPTURE_BYTES = 2 * 1024 * 1024
+TRUNCATION_MARKER = b"\n[output truncated by remote agent]\n"
 
 
 class FatalAgentError(Exception):
@@ -76,25 +78,50 @@ class ShellExecutor:
             **process_options,
         )
         self.processes[request_id] = process
+        stdout_task = asyncio.create_task(self._capture_stream(process.stdout))
+        stderr_task = asyncio.create_task(self._capture_stream(process.stderr))
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            await asyncio.wait_for(process.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             await self._terminate(process)
-            await process.communicate()
+            await process.wait()
+            await asyncio.gather(stdout_task, stderr_task)
             raise TimeoutError(f"命令执行超时 ({timeout:g}s)")
         except asyncio.CancelledError:
             if process.returncode is None:
                 await self._terminate(process)
-                await process.communicate()
+                await process.wait()
+            await asyncio.gather(stdout_task, stderr_task)
             raise
         finally:
             self.processes.pop(request_id, None)
+
+        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
 
         return {
             "stdout": stdout.decode("utf-8", "replace"),
             "stderr": stderr.decode("utf-8", "replace"),
             "exit_code": process.returncode,
         }
+
+    @staticmethod
+    async def _capture_stream(stream: asyncio.StreamReader | None) -> bytes:
+        if stream is None:
+            return b""
+        captured = bytearray()
+        truncated = False
+        while True:
+            chunk = await stream.read(64 * 1024)
+            if not chunk:
+                break
+            remaining = MAX_CAPTURE_BYTES - len(captured)
+            if remaining > 0:
+                captured.extend(chunk[:remaining])
+            if len(chunk) > remaining:
+                truncated = True
+        if truncated:
+            captured.extend(TRUNCATION_MARKER)
+        return bytes(captured)
 
     async def cancel(self, request_id: str) -> None:
         process = self.processes.get(request_id)

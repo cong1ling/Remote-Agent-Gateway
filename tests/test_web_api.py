@@ -52,6 +52,13 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/mcp-keys/{listed[0]['id']}").status_code, 204)
         self.assertIsNotNone(self.client.get("/api/mcp-keys").json()["keys"][0]["revoked_at"])
 
+    def test_web_responses_include_security_headers(self) -> None:
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+
     def test_enrollment_registers_agent_and_cannot_be_reused(self) -> None:
         self.register()
         created = self.client.post("/api/enrollment-tokens", json={"name": "GPU Notebook"})

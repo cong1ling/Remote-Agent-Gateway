@@ -6,7 +6,7 @@ import time
 import unittest
 from pathlib import Path
 
-from agent import ShellExecutor
+from agent import MAX_CAPTURE_BYTES, TRUNCATION_MARKER, ShellExecutor
 
 
 class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
@@ -27,6 +27,15 @@ class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(TimeoutError):
                 await executor.execute("request-2", {"command": command, "timeout": 0.1})
             self.assertLess(time.monotonic() - started, 1.5)
+
+    async def test_exec_caps_output_without_blocking_process(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executor = ShellExecutor(Path(directory))
+            command = f'"{sys.executable}" -c "print(\'x\' * {MAX_CAPTURE_BYTES + 1024})"'
+            result = await executor.execute("request-3", {"command": command, "timeout": 10})
+        encoded = result["stdout"].encode("utf-8")
+        self.assertLessEqual(len(encoded), MAX_CAPTURE_BYTES + len(TRUNCATION_MARKER))
+        self.assertIn("output truncated by remote agent", result["stdout"])
 
 
 if __name__ == "__main__":
