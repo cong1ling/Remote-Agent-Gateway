@@ -172,3 +172,12 @@ class AgentHub:
             except RuntimeError:
                 pass
 
+    async def disconnect(self, agent_id: str, reason: str = "Agent 已被撤销") -> None:
+        connection = self._connections.get(agent_id)
+        if connection is None:
+            return
+        try:
+            await connection.websocket.close(code=4003, reason=reason)
+        except RuntimeError:
+            pass
+

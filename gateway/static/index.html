@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Remote Agent Gateway</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <main id="auth-view" class="auth-layout">
+    <section class="auth-brand">
+      <div class="brand-mark" aria-hidden="true">RG</div>
+      <div>
+        <h1>Remote Agent Gateway</h1>
+        <p>管理你的远程执行环境</p>
+      </div>
+      <dl class="auth-status">
+        <div><dt>连接方式</dt><dd>主动出站</dd></div>
+        <div><dt>远程协议</dt><dd>Profile v1</dd></div>
+        <div><dt>MCP</dt><dd>Streamable HTTP</dd></div>
+      </dl>
+    </section>
+    <section class="auth-panel">
+      <div class="auth-box">
+        <div class="segmented" role="tablist" aria-label="账号操作">
+          <button id="login-tab" class="active" type="button">登录</button>
+          <button id="register-tab" type="button">注册</button>
+        </div>
+        <form id="auth-form">
+          <h2 id="auth-title">登录网关</h2>
+          <label>邮箱<input id="auth-email" type="email" autocomplete="email" required maxlength="254"></label>
+          <label>密码<input id="auth-password" type="password" autocomplete="current-password" required minlength="10" maxlength="128"></label>
+          <p id="auth-error" class="form-error" role="alert"></p>
+          <button id="auth-submit" class="primary wide" type="submit">登录</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <div id="app-view" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><span class="brand-mark small">RG</span><strong>Remote Gateway</strong></div>
+      <nav id="main-nav" aria-label="主导航">
+        <button class="active" data-view="overview" type="button"><span>01</span>概览</button>
+        <button data-view="agents" type="button"><span>02</span>远程 Agent</button>
+        <button data-view="keys" type="button"><span>03</span>MCP Keys</button>
+        <button data-view="tokens" type="button"><span>04</span>注册令牌</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span id="user-email"></span>
+        <button id="logout-button" class="text-button" type="button">退出登录</button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" type="button" title="打开导航" aria-label="打开导航">☰</button>
+        <div><p id="page-eyebrow">Workspace</p><h1 id="page-title">概览</h1></div>
+        <button id="refresh-button" class="secondary" type="button">刷新</button>
+      </header>
+
+      <main class="content">
+        <section id="view-overview" class="view active">
+          <div class="metrics" id="metrics"></div>
+          <div class="section-heading"><div><h2>最近的 Agent</h2><p>当前账号下注册的远程执行环境</p></div><button class="primary" data-action="new-token" type="button">注册 Agent</button></div>
+          <div id="overview-agents" class="agent-list"></div>
+        </section>
+
+        <section id="view-agents" class="view">
+          <div class="section-heading"><div><h2>远程 Agent</h2><p>设备状态、用途和标准 Profile</p></div><button class="primary" data-action="new-token" type="button">注册 Agent</button></div>
+          <div id="agents-list" class="agent-list"></div>
+        </section>
+
+        <section id="view-keys" class="view">
+          <div class="section-heading"><div><h2>MCP Access Keys</h2><p>为 Claude、WorkBuddy 或其他 MCP 客户端分别创建凭据</p></div><button id="new-key-button" class="primary" type="button">创建 Key</button></div>
+          <div class="endpoint-band"><div><span>MCP Endpoint</span><code id="mcp-endpoint"></code></div><button class="secondary copy-endpoint" type="button">复制</button></div>
+          <div id="keys-list" class="data-list"></div>
+        </section>
+
+        <section id="view-tokens" class="view">
+          <div class="section-heading"><div><h2>Agent 注册令牌</h2><p>一次性令牌用于把新的远程环境绑定到当前账号</p></div><button class="primary" data-action="new-token" type="button">创建令牌</button></div>
+          <div id="tokens-list" class="data-list"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="form-dialog">
+    <form id="dialog-form" method="dialog">
+      <div class="dialog-head"><div><p id="dialog-eyebrow">Create</p><h2 id="dialog-title"></h2></div><button class="icon-button" value="cancel" aria-label="关闭" title="关闭" type="submit">×</button></div>
+      <div id="dialog-fields"></div>
+      <p id="dialog-error" class="form-error"></p>
+      <div class="dialog-actions"><button class="secondary" value="cancel" type="submit">取消</button><button id="dialog-submit" class="primary" value="default" type="submit">确认</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="secret-dialog">
+    <div class="dialog-head"><div><p>Shown once</p><h2 id="secret-title">凭据已创建</h2></div><button id="secret-close" class="icon-button" aria-label="关闭" title="关闭" type="button">×</button></div>
+    <p class="secret-warning">关闭后将无法再次查看，请立即保存到目标客户端。</p>
+    <label id="secret-label">Secret<textarea id="secret-value" readonly rows="3"></textarea></label>
+    <label id="command-block" class="hidden">启动命令<textarea id="command-value" readonly rows="5"></textarea></label>
+    <div class="dialog-actions"><button id="copy-secret" class="secondary" type="button">复制 Secret</button><button id="copy-command" class="primary hidden" type="button">复制启动命令</button></div>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
