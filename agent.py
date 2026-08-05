@@ -5,7 +5,9 @@ import asyncio
 import json
 import os
 import platform
+import signal
 import socket
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -61,22 +63,28 @@ class ShellExecutor:
         if timeout <= 0:
             raise ValueError("timeout 必须大于 0")
 
+        process_options: dict[str, Any] = {}
+        if os.name == "nt":
+            process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            process_options["start_new_session"] = True
         process = await asyncio.create_subprocess_shell(
             command,
             cwd=self.workdir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **process_options,
         )
         self.processes[request_id] = process
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
-            process.kill()
+            await self._terminate(process)
             await process.communicate()
             raise TimeoutError(f"命令执行超时 ({timeout:g}s)")
         except asyncio.CancelledError:
             if process.returncode is None:
-                process.kill()
+                await self._terminate(process)
                 await process.communicate()
             raise
         finally:
@@ -91,6 +99,29 @@ class ShellExecutor:
     async def cancel(self, request_id: str) -> None:
         process = self.processes.get(request_id)
         if process is not None and process.returncode is None:
+            await self._terminate(process)
+
+    @staticmethod
+    async def _terminate(process: asyncio.subprocess.Process) -> None:
+        if process.returncode is not None:
+            return
+        if os.name == "nt":
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.returncode is None:
             process.kill()
 
 
