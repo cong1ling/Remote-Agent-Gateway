@@ -75,6 +75,20 @@ def create_web_router(db: Database, settings: Settings, hub: AgentHub) -> APIRou
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @router.get("/session")
+    def session_status(
+        session_token: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+    ) -> dict[str, Any]:
+        user = db.get_session_user(hash_token(session_token)) if session_token else None
+        if user is None:
+            return {"authenticated": False}
+        return {
+            "authenticated": True,
+            "user": user,
+            "mcp_url": f"{settings.public_url}/mcp/",
+            "agent_websocket_url": settings.websocket_url,
+        }
+
     @router.post("/auth/register", status_code=201)
     def register(credentials: Credentials, response: Response) -> dict[str, Any]:
         email = _normalize_email(credentials.email)

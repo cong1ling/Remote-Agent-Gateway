@@ -53,10 +53,11 @@ function showApp() {
 
 async function loadAll(silent = false) {
   try {
-    const me = await api("/me");
-    state.user = me.user;
-    state.mcpUrl = me.mcp_url;
-    state.wsUrl = me.agent_websocket_url;
+    const session = await api("/session");
+    if (!session.authenticated) { showAuth(); return; }
+    state.user = session.user;
+    state.mcpUrl = session.mcp_url;
+    state.wsUrl = session.agent_websocket_url;
     const [agents, keys, tokens] = await Promise.all([api("/agents"), api("/mcp-keys"), api("/enrollment-tokens")]);
     state.agents = agents.agents;
     state.keys = keys.keys;
