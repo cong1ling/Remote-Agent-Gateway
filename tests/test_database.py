@@ -87,6 +87,8 @@ class DatabaseTests(unittest.TestCase):
         self.assertIsNotNone(self.db.get_owned_agent(owner["id"], agent_id))
         self.assertIsNone(self.db.get_owned_agent(other["id"], agent_id))
         self.assertEqual(self.db.list_agents(other["id"]), [])
+        self.assertTrue(self.db.revoke_agent(owner["id"], agent_id))
+        self.assertEqual(self.db.list_agents(owner["id"]), [])
 
     def test_revoked_mcp_key_cannot_authenticate(self) -> None:
         user = self.create_user()

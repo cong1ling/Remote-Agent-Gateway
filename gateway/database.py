@@ -341,7 +341,9 @@ class Database:
                 """
                 SELECT id, user_id, name, description, profiles_json, created_at,
                        last_seen_at, revoked_at
-                FROM agents WHERE user_id = ? ORDER BY created_at DESC
+                FROM agents
+                WHERE user_id = ? AND revoked_at IS NULL
+                ORDER BY created_at DESC
                 """,
                 (user_id,),
             ).fetchall()
