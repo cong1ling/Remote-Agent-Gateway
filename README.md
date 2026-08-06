@@ -12,7 +12,33 @@ Python Gateway ---- Web UI / SQLite
 Remote Agent
 ```
 
-远程 Agent 不是 MCP Server。它只实现网关定义的标准 Profile；第一版仅包含 `shell.v1`。
+远程 Agent 不是 MCP Server。MCP 只运行在网关，远程端只保留连接 Core 和实际能力 Handler；第一版仅包含 `shell.v1`。
+
+## Profile 与 Handler
+
+Profile 是网关维护的跨平台能力契约，不是某种编程语言的插件、操作系统名称或设备型号。它规定 AI 能调用什么、参数与返回值是什么以及有哪些限制；Handler 负责在具体环境中实现这份契约。
+
+一个 Profile 可以包含多个语义相关的 Action，每个对 AI 开放的 Action 映射到一个固定的网关 MCP 工具：
+
+```text
+Profile（固定契约）
+├── Action A → 固定 MCP 工具 A
+└── Action B → 固定 MCP 工具 B
+
+Handler（具体实现）
+├── Python / Windows
+├── Go / Linux
+├── Rust / 嵌入式系统
+└── 移动端原生 API
+```
+
+实现方式可以不同，但外部行为必须一致。官方 Python Agent 提供通用 Handler；其他实现可以使用 Go、Rust、C 或平台原生 API，只要仍然遵守同一个 Profile 契约。无法完整实现契约的环境不能声明该 Profile，修改了语义的自定义实现也不能继续使用原 Profile ID。
+
+`shell.v1` 已经使用了这套模型：它统一规定 `command → stdout/stderr/exit_code`，具体 Agent 再声明 PowerShell、CMD 或 POSIX sh 方言。命令语言无法跨系统完全统一，因此 AI 必须按 `get_agent_capabilities` 返回的 runtime 方言生成命令。
+
+未来若增加 `workspace.v1`，可以在同一个 Profile 下定义语义相关的 `read`、`write`、`edit` Action。协议统一相对路径、文本编码、冲突和写入结果，Python、Rust 或移动端 Handler 各自使用本地文件 API 实现；没有可写文件系统的设备则不声明它。`workspace.v1` 当前仍是候选设计，尚未包含在已发布能力中。
+
+Profile 的新增准入条件、版本和实现流程见 [Profile 开发规范](PROFILE_DEVELOPMENT.md)。
 
 ## 当前能力
 
@@ -126,8 +152,6 @@ remote_agent/
 ├── core/       # 连接、凭据、Manifest、协议路由
 └── profiles/   # 标准能力 Handler
 ```
-
-后续扩展标准能力前，请先阅读 [Profile 开发规范](PROFILE_DEVELOPMENT.md)，尤其是“现有 Profile 无法表达”这一准入条件。
 
 ## MCP 配置
 
