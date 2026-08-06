@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import shutil
 import sys
 import tempfile
 import time
@@ -60,6 +61,31 @@ class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
         encoded = result["stdout"].encode("utf-8")
         self.assertLessEqual(len(encoded), MAX_CAPTURE_BYTES + len(TRUNCATION_MARKER))
         self.assertIn("output truncated by remote agent", result["stdout"])
+
+    async def test_powershell_formats_object_output_before_exit(self) -> None:
+        executable = (
+            shutil.which("pwsh")
+            or shutil.which("powershell.exe")
+            or shutil.which("powershell")
+        )
+        if executable is None:
+            self.skipTest("PowerShell is not installed")
+
+        runtime = ShellRuntime("windows", "powershell", executable)
+        with tempfile.TemporaryDirectory() as directory:
+            executor = ShellExecutor(Path(directory), runtime)
+            result = await executor.execute(
+                "request-object-output",
+                {
+                    "command": (
+                        "[pscustomobject]@{ Marker = 'object-output-visible' }"
+                    ),
+                    "timeout": 10,
+                },
+            )
+
+        self.assertEqual(result["exit_code"], 0)
+        self.assertIn("object-output-visible", result["stdout"])
 
     def test_windows_detection_prefers_powershell_then_cmd(self) -> None:
         executables = {

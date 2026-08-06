@@ -41,6 +41,10 @@ class ShellRuntime:
 
     def command_argv(self, command: str) -> list[str]:
         if self.dialect == "powershell":
+            # PowerShell defers formatting rich objects until its default output
+            # pipeline runs. Force that pipeline to finish before the explicit
+            # exit below, otherwise cmdlets such as Get-Item can succeed while
+            # their object output never reaches stdout.
             script = (
                 "$OutputEncoding = [Console]::OutputEncoding = "
                 "[System.Text.UTF8Encoding]::new($false)\n"
@@ -51,7 +55,7 @@ class ShellRuntime:
                 f"{command}\n"
                 "  $script:__remoteAgentShellSuccess = $?\n"
                 "  $script:__remoteAgentNativeExitCode = $LASTEXITCODE\n"
-                "}\n"
+                "} | Out-Default\n"
                 "if (-not $script:__remoteAgentShellSuccess) {\n"
                 "  if ($null -ne $script:__remoteAgentNativeExitCode -and "
                 "$script:__remoteAgentNativeExitCode -ne 0) { "

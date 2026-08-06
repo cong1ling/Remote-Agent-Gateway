@@ -1,6 +1,6 @@
 {
   "runtime": "python",
-  "agent_version": "0.1.2",
+  "agent_version": "0.1.3",
   "core_version": 3,
   "build_id": "source-dev",
   "profiles": [
