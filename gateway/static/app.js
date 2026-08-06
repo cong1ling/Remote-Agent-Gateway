@@ -76,6 +76,51 @@ function emptyState(title, detail) {
   return `<div class="empty"><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div></div>`;
 }
 
+function schemaField(field, required = false) {
+  const facts = [`类型：${field.type}`, required ? "必填" : "可选"];
+  if (Object.hasOwn(field, "default")) facts.push(`默认：${field.default}`);
+  if (Object.hasOwn(field, "minimum")) facts.push(`最小：${field.minimum}`);
+  return `<article class="schema-field"><header><code>${escapeHtml(field.name)}</code><span>${escapeHtml(facts.join(" · "))}</span></header><p>${escapeHtml(field.description || "按协议返回该字段。")}</p></article>`;
+}
+
+function formatBytes(value) {
+  if (Number.isInteger(value) && value % (1024 * 1024) === 0) return `${value / (1024 * 1024)} MiB`;
+  return `${value} bytes`;
+}
+
+function openProfileDialog(profileId) {
+  const profile = state.catalog.find((item) => item.id === profileId);
+  if (!profile) return;
+  const runtime = profile.runtime_contract || {};
+  const limits = profile.limits || {};
+  const runtimeFields = (runtime.fields || []).map((field) => schemaField(field, true)).join("");
+  const dialects = (runtime.dialects || []).map((dialect) => `<article class="dialect-card">
+    <header><strong>${escapeHtml(dialect.label)}</strong><code>${escapeHtml(dialect.id)}</code></header>
+    <p>${escapeHtml((dialect.systems || []).join(" / "))}</p>
+    <span>检测：${escapeHtml((dialect.detection || []).join(" → "))}</span>
+    <span>示例：<code>${escapeHtml(dialect.example)}</code></span>
+  </article>`).join("");
+  const actions = (profile.actions || []).map((action) => `<section class="protocol-section">
+    <div class="protocol-section-head"><div><span>Action</span><h3>${escapeHtml(action.name)}</h3></div><p>${escapeHtml(action.description)}</p></div>
+    <h4>输入参数</h4><div class="schema-list">${(action.parameters || []).map((field) => schemaField(field, field.required)).join("")}</div>
+    <h4>返回字段</h4><div class="schema-list">${(action.returns || []).map((field) => schemaField(field, true)).join("")}</div>
+    <h4>错误语义</h4><div class="error-list">${(action.errors || []).map((error) => `<div><code>${escapeHtml(error.name)}</code><span>${escapeHtml(error.description)}</span></div>`).join("")}</div>
+  </section>`).join("");
+  const limitItems = [
+    limits.capture_bytes_per_stream ? `stdout / stderr 各最多 ${formatBytes(limits.capture_bytes_per_stream)}` : "",
+    limits.truncation_marker ? `截断标记：${limits.truncation_marker}` : "",
+    limits.timeout_terminates_process_tree ? "超时、取消或断线会终止本次命令的整个进程树" : "",
+  ].filter(Boolean);
+  $("#profile-dialog-eyebrow").textContent = `${profile.id} · ${profile.status === "stable" ? "稳定" : profile.status}`;
+  $("#profile-dialog-title").textContent = `${profile.name} 协议`;
+  $("#profile-dialog-body").innerHTML = `
+    <section class="protocol-lead"><p>${escapeHtml(profile.description)}</p><div>${(profile.runtimes || []).map((item) => `<span>${escapeHtml(item)} 实现</span>`).join("")}</div></section>
+    <section class="protocol-section"><div class="protocol-section-head"><div><span>Runtime</span><h3>Shell 方言声明</h3></div><p>${escapeHtml(runtime.selection || "Agent 必须声明具体运行时。")}</p></div><div class="schema-list">${runtimeFields}</div><div class="dialect-grid">${dialects}</div></section>
+    ${actions}
+    <section class="protocol-section"><div class="protocol-section-head"><div><span>Limits</span><h3>执行限制</h3></div></div><ul class="limit-list">${limitItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>`;
+  $("#profile-dialog").showModal();
+}
+
 function shellRuntimeLabel(agent) {
   const declaration = (agent.profile_declarations || []).find((profile) => profile.id === "shell.v1");
   if (!declaration?.runtime) return "";
@@ -151,7 +196,7 @@ function renderBuilder() {
       const returns = (action.returns || []).map((field) => `${field.name}: ${field.type}`).join(" · ");
       return `<strong>${escapeHtml(action.name)}</strong><code>${escapeHtml(parameters)}</code><span>返回 ${escapeHtml(returns)}</span>`;
     }).join("")}</div>
-    <div class="catalog-meta"><span class="catalog-status">${profile.status === "stable" ? "稳定" : escapeHtml(profile.status)}</span>${profile.runtimes.map((runtime) => `<span>${escapeHtml(runtime)}</span>`).join("")}</div>
+    <footer class="catalog-footer"><div class="catalog-meta"><span class="catalog-status">${profile.status === "stable" ? "稳定" : escapeHtml(profile.status)}</span>${profile.runtimes.map((runtime) => `<span>${escapeHtml(runtime)}</span>`).join("")}</div><button class="secondary" data-profile-details="${escapeHtml(profile.id)}" type="button">查看协议</button></footer>
   </article>`).join("") : emptyState("暂无可组装 Profile", "网关管理员尚未发布标准能力");
 
   $("#bundles-list").innerHTML = state.bundles.length ? state.bundles.map((bundle) => {
@@ -277,11 +322,14 @@ function bindEvents() {
     finally { button.disabled = false; }
   };
   $("#secret-close").onclick = () => $("#secret-dialog").close();
+  $("#profile-dialog-close").onclick = () => $("#profile-dialog").close();
+  $("#profile-dialog-done").onclick = () => $("#profile-dialog").close();
   $("#copy-secret").onclick = () => copyText($("#secret-value").value, "Secret 已复制");
   $("#copy-command").onclick = () => copyText($("#command-value").value, "启动命令已复制");
   $(".copy-endpoint").onclick = () => copyText(state.mcpUrl, "MCP Endpoint 已复制");
   document.body.onclick = async (event) => {
     const target = event.target;
+    if (target.dataset.profileDetails) openProfileDialog(target.dataset.profileDetails);
     const agentId = target.dataset.editAgent;
     if (agentId) {
       const agent = state.agents.find((item) => item.id === agentId);

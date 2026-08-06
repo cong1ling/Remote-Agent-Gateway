@@ -122,6 +122,27 @@ class WebApiTests(unittest.TestCase):
         self.assertNotIn("--name", payload["command"])
         self.assertEqual(self.client.get("/api/agent-bundles").json()["bundles"], [])
 
+    def test_profile_catalog_exposes_detailed_shell_contract(self) -> None:
+        self.register()
+        profile = self.client.get("/api/profile-catalog").json()["profiles"][0]
+        self.assertEqual(profile["id"], "shell.v1")
+        self.assertEqual(
+            [dialect["id"] for dialect in profile["runtime_contract"]["dialects"]],
+            ["powershell", "cmd", "posix-sh"],
+        )
+        action = profile["actions"][0]
+        self.assertEqual(action["name"], "exec")
+        self.assertEqual(action["parameters"][1]["default"], 300)
+        self.assertEqual(
+            [field["name"] for field in action["returns"]],
+            ["stdout", "stderr", "exit_code"],
+        )
+        self.assertEqual(
+            [error["name"] for error in action["errors"]],
+            ["timeout", "cancelled", "invalid_result"],
+        )
+        self.assertEqual(profile["limits"]["capture_bytes_per_stream"], 2 * 1024 * 1024)
+
     def test_old_agent_protocol_is_rejected_with_upgrade_message(self) -> None:
         self.register()
         created = self.client.post("/api/enrollment-tokens", json={"name": "Old Agent"})

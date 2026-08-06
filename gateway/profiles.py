@@ -43,12 +43,77 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
                     },
                 ],
                 "returns": [
-                    {"name": "stdout", "type": "string"},
-                    {"name": "stderr", "type": "string"},
-                    {"name": "exit_code", "type": "integer"},
+                    {
+                        "name": "stdout",
+                        "type": "string",
+                        "description": "命令的标准输出，使用替换字符处理无法解码的字节。",
+                    },
+                    {
+                        "name": "stderr",
+                        "type": "string",
+                        "description": "命令的错误输出，使用替换字符处理无法解码的字节。",
+                    },
+                    {
+                        "name": "exit_code",
+                        "type": "integer",
+                        "description": "Shell 进程退出码；通常 0 表示成功。",
+                    },
+                ],
+                "errors": [
+                    {
+                        "name": "timeout",
+                        "description": "超过 timeout 后终止本次命令的整个进程树。",
+                    },
+                    {
+                        "name": "cancelled",
+                        "description": "网关取消、连接断开或 Agent 离线时终止任务。",
+                    },
+                    {
+                        "name": "invalid_result",
+                        "description": "返回值不符合契约时由网关拒绝结果。",
+                    },
                 ],
             }
         ],
+        "runtime_contract": {
+            "selection": "Agent 启动时检测一次可用 Shell，并在该进程生命周期内固定使用。",
+            "fields": [
+                {"name": "os", "type": "string", "description": "远程设备操作系统。"},
+                {
+                    "name": "dialect",
+                    "type": "string",
+                    "description": "命令必须遵循的 Shell 方言。",
+                },
+                {
+                    "name": "executable",
+                    "type": "string",
+                    "description": "Agent 实际选择的 Shell 可执行文件名。",
+                },
+            ],
+            "dialects": [
+                {
+                    "id": "powershell",
+                    "label": "PowerShell",
+                    "systems": ["Windows"],
+                    "detection": ["pwsh", "powershell.exe"],
+                    "example": "Get-Location",
+                },
+                {
+                    "id": "cmd",
+                    "label": "CMD",
+                    "systems": ["Windows"],
+                    "detection": ["cmd.exe"],
+                    "example": "cd",
+                },
+                {
+                    "id": "posix-sh",
+                    "label": "POSIX Shell",
+                    "systems": ["Linux", "macOS"],
+                    "detection": ["/bin/sh"],
+                    "example": "pwd",
+                },
+            ],
+        },
         "limits": {
             "capture_bytes_per_stream": SHELL_MAX_CAPTURE_BYTES,
             "truncation_marker": SHELL_TRUNCATION_MARKER.strip(),
@@ -166,6 +231,7 @@ def public_profile_catalog() -> list[dict[str, Any]]:
                 "status": definition["status"],
                 "runtimes": sorted(definition["implementations"]),
                 "actions": deepcopy(definition["actions"]),
+                "runtime_contract": deepcopy(definition.get("runtime_contract", {})),
                 "limits": deepcopy(definition.get("limits", {})),
             }
         )
