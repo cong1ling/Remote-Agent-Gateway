@@ -121,14 +121,26 @@ function openProfileDialog(profileId) {
   $("#profile-dialog").showModal();
 }
 
-function shellRuntimeLabel(agent) {
-  const declaration = (agent.profile_declarations || []).find((profile) => profile.id === "shell.v1");
+function profileRuntimeLabel(declaration) {
   if (!declaration?.runtime) return "";
   const osLabels = { windows: "Windows", linux: "Linux", macos: "macOS", posix: "POSIX" };
   const dialectLabels = { powershell: "PowerShell", cmd: "CMD", "posix-sh": "/bin/sh" };
-  const osName = osLabels[declaration.runtime.os] || declaration.runtime.os;
-  const shellName = dialectLabels[declaration.runtime.dialect] || declaration.runtime.dialect;
-  return `${osName} · ${shellName}`;
+  const runtime = declaration.runtime;
+  const labels = [
+    osLabels[runtime.os] || runtime.os,
+    dialectLabels[runtime.dialect] || runtime.dialect || runtime.engine || runtime.language,
+  ].filter(Boolean);
+  return [...new Set(labels)].join(" · ");
+}
+
+function agentProfileBadges(agent) {
+  const declarations = agent.profile_declarations || [];
+  const declarationsById = new Map(declarations.map((declaration) => [declaration.id, declaration]));
+  const profileIds = (agent.profiles || []).length ? agent.profiles : declarations.map((declaration) => declaration.id);
+  return profileIds.map((profileId) => {
+    const runtime = profileRuntimeLabel(declarationsById.get(profileId));
+    return `<span class="profile${runtime ? " profile-runtime" : ""}"><span>${escapeHtml(profileId)}</span>${runtime ? `<small>${escapeHtml(runtime)}</small>` : ""}</span>`;
+  }).join("");
 }
 
 function agentVersionView(agent) {
@@ -151,13 +163,12 @@ function agentVersionView(agent) {
 }
 
 function agentCard(agent) {
-  const profiles = (agent.profiles || []).map((profile) => `<span class="profile">${escapeHtml(profile)}</span>`).join("");
-  const shellRuntime = shellRuntimeLabel(agent);
+  const profiles = agentProfileBadges(agent);
   const upgrade = agent.requires_reenrollment ? '<span class="upgrade-badge">需重新注册</span>' : "";
   const version = agentVersionView(agent);
   return `<article class="agent-card">
     <div class="agent-title"><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.description || "暂无用途描述")}</p><small>${escapeHtml(version.text)}</small></div>
-    <div class="agent-meta"><span class="status ${agent.online ? "online" : ""}">${agent.online ? "在线" : "离线"}</span><span class="version-badge ${escapeHtml(version.status)}">${escapeHtml(version.label)}</span>${upgrade}${profiles}${shellRuntime ? `<span class="runtime-badge">${escapeHtml(shellRuntime)}</span>` : ""}<span>${formatTime(agent.last_seen_at)}</span></div>
+    <div class="agent-meta"><span class="status ${agent.online ? "online" : ""}">${agent.online ? "在线" : "离线"}</span><span class="version-badge ${escapeHtml(version.status)}">${escapeHtml(version.label)}</span>${upgrade}${profiles}<span>${formatTime(agent.last_seen_at)}</span></div>
     <div class="row-actions"><button class="secondary" data-edit-agent="${agent.id}">编辑</button><button class="danger" data-revoke-agent="${agent.id}">撤销</button></div>
   </article>`;
 }

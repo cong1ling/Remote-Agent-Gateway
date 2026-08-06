@@ -121,8 +121,8 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #9aa59f; }
 .status.online { color: var(--accent); }
 .status.online::before { background: #20a36c; box-shadow: 0 0 0 3px #e2f4eb; }
-.profile { padding: 3px 7px; border-radius: 4px; color: var(--blue); background: #edf4fb; }
-.runtime-badge { padding: 3px 7px; border-radius: 4px; color: #6b4d12; background: #fff3d9; }
+.profile { padding: 3px 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 6px; color: var(--blue); background: #edf4fb; }
+.profile-runtime small { padding-left: 6px; border-left: 1px solid #bfd1e3; color: #5d7083; font-size: 10px; }
 .upgrade-badge { padding: 3px 7px; border-radius: 4px; color: var(--danger); background: #fbe9e7; }
 .version-badge { padding: 3px 7px; border-radius: 4px; color: #5d6863; background: #edf0ef; }
 .version-badge.current { color: var(--accent); background: #e2f4eb; }
