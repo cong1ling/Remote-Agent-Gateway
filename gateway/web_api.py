@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from .agent_builder import AgentBuildError, PythonAgentBuilder, new_bundle_id
 from .agent_hub import AgentHub
+from .agent_protocol import agent_version_status
 from .config import Settings
 from .database import ConflictError, Database
 from .profiles import (
@@ -54,6 +55,7 @@ def _agent_view(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
     result["online"] = hub.is_online(agent["id"])
     result["capabilities"] = profile_names(agent["profiles"])
     result["requires_reenrollment"] = not agent["profile_declarations"]
+    result["version_status"] = agent_version_status(agent["version"])
     return result
 
 

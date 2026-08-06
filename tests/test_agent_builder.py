@@ -27,11 +27,15 @@ class AgentBuilderTests(unittest.TestCase):
                 root = filename.removesuffix(".zip")
                 self.assertIn(f"{root}/run.py", names)
                 self.assertIn(f"{root}/remote_agent/core/runtime.py", names)
+                self.assertIn(f"{root}/remote_agent/core/version.py", names)
                 self.assertIn(f"{root}/remote_agent/profiles/shell_v1.py", names)
                 manifest = json.loads(
                     archive.read(f"{root}/remote_agent/manifest.json").decode("utf-8")
                 )
         self.assertEqual(manifest["profiles"], ["shell.v1"])
+        self.assertEqual(manifest["agent_version"], "0.1.0")
+        self.assertEqual(manifest["core_version"], 1)
+        self.assertEqual(manifest["build_id"], "12345678-1234-1234-1234-123456789012")
         self.assertEqual(manifest["agent"]["name"], "GPU Notebook")
         self.assertEqual(manifest["agent"]["description"], "模型训练环境")
 

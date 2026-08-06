@@ -5,12 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import FatalAgentError
+from .version import AGENT_VERSION, CORE_VERSION
 
 
 @dataclass(frozen=True, slots=True)
 class AgentManifest:
     runtime: str
+    agent_version: str
     core_version: int
+    build_id: str
     profiles: tuple[str, ...]
     name: str | None = None
     description: str = ""
@@ -30,13 +33,24 @@ def load_manifest(path: Path | None = None) -> AgentManifest:
     if not isinstance(raw, dict):
         raise FatalAgentError("Agent Manifest 必须是 JSON 对象")
     runtime = raw.get("runtime")
+    agent_version = raw.get("agent_version")
     core_version = raw.get("core_version")
+    build_id = raw.get("build_id")
     profiles = raw.get("profiles")
     agent = raw.get("agent", {})
     if runtime != "python":
         raise FatalAgentError(f"当前运行时不支持 Manifest runtime: {runtime}")
-    if core_version != 1:
+    if agent_version != AGENT_VERSION:
+        raise FatalAgentError(f"Manifest agent_version 与当前代码不一致: {agent_version}")
+    if core_version != CORE_VERSION:
         raise FatalAgentError(f"当前 Agent 不支持 core_version: {core_version}")
+    if (
+        not isinstance(build_id, str)
+        or not build_id
+        or len(build_id) > 80
+        or not all(character.isalnum() or character in "._:-" for character in build_id)
+    ):
+        raise FatalAgentError("Agent Manifest 的 build_id 无效")
     if not isinstance(profiles, list) or not profiles or not all(
         isinstance(profile, str) and profile for profile in profiles
     ):
@@ -52,7 +66,9 @@ def load_manifest(path: Path | None = None) -> AgentManifest:
     deduplicated = tuple(dict.fromkeys(profiles))
     return AgentManifest(
         runtime=runtime,
+        agent_version=agent_version,
         core_version=core_version,
+        build_id=build_id,
         profiles=deduplicated,
         name=name.strip() if isinstance(name, str) else None,
         description=description.strip(),

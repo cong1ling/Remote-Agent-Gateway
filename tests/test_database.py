@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import time
 import unittest
 import uuid
+from contextlib import closing
 from pathlib import Path
 
 from gateway.database import ConflictError, Database
@@ -20,6 +22,12 @@ SHELL_DECLARATIONS = [
         },
     }
 ]
+AGENT_VERSION = {
+    "agent_version": "0.1.0",
+    "core_version": 1,
+    "protocol_version": 2,
+    "build_id": "test-build",
+}
 
 
 class DatabaseTests(unittest.TestCase):
@@ -63,6 +71,7 @@ class DatabaseTests(unittest.TestCase):
             "gpu-notebook",
             "模型训练环境",
             SHELL_DECLARATIONS,
+            AGENT_VERSION,
         )
         self.assertEqual(registered["user_id"], user["id"])
         self.assertIsNone(
@@ -74,6 +83,7 @@ class DatabaseTests(unittest.TestCase):
                 "duplicate",
                 "",
                 SHELL_DECLARATIONS,
+                AGENT_VERSION,
             )
         )
 
@@ -94,12 +104,14 @@ class DatabaseTests(unittest.TestCase):
             "private-agent",
             "",
             SHELL_DECLARATIONS,
+            AGENT_VERSION,
         )
 
         agent = self.db.get_owned_agent(owner["id"], agent_id)
         self.assertIsNotNone(agent)
         self.assertEqual(agent["profiles"], ["shell.v1"])
         self.assertEqual(agent["profile_declarations"], SHELL_DECLARATIONS)
+        self.assertEqual(agent["version"], AGENT_VERSION)
         self.assertIsNone(self.db.get_owned_agent(other["id"], agent_id))
         self.assertEqual(self.db.list_agents(other["id"]), [])
         self.assertTrue(self.db.revoke_agent(owner["id"], agent_id))
@@ -121,11 +133,38 @@ class DatabaseTests(unittest.TestCase):
             "legacy-agent",
             "",
             ["shell.v1"],  # type: ignore[arg-type]
+            {},
         )
 
         agent = self.db.get_owned_agent(user["id"], agent_id)
         self.assertEqual(agent["profiles"], [])
         self.assertEqual(agent["profile_declarations"], [])
+        self.assertEqual(agent["version"], {})
+
+    def test_initialize_adds_version_column_to_existing_agent_table(self) -> None:
+        path = Path(self.tempdir.name) / "legacy.db"
+        with closing(sqlite3.connect(path)) as connection:
+            connection.execute(
+                """
+                CREATE TABLE agents (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    profiles_json TEXT NOT NULL,
+                    credential_prefix TEXT NOT NULL,
+                    credential_hash TEXT NOT NULL UNIQUE,
+                    created_at INTEGER NOT NULL,
+                    last_seen_at INTEGER NOT NULL,
+                    revoked_at INTEGER
+                )
+                """
+            )
+            connection.commit()
+        Database(path).initialize()
+        with closing(sqlite3.connect(path)) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(agents)")}
+        self.assertIn("version_json", columns)
 
     def test_revoked_mcp_key_cannot_authenticate(self) -> None:
         user = self.create_user()

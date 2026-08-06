@@ -79,6 +79,8 @@
   - Linux/macOS：使用 `/bin/sh`
   - 找不到可用 Shell：不能声明或启动 `shell.v1`
 - Agent 必须上报 `os`、`dialect` 和 `executable`；网关必须保存并通过网页、`list_agents` 和 `get_agent_capabilities` 向用户及 AI 暴露。
+- Agent 还必须上报 `agent_version`、`core_version`、`protocol_version` 和 `build_id`。工作台生成的每个 ZIP 使用 Bundle ID 作为唯一 `build_id`，源码运行使用明确的开发构建 ID。
+- 网关必须持久化版本信息并计算“当前版本”“需要升级”“协议不兼容”“高于网关版本”或“未知版本”状态；第一版不实现自动更新器。
 - `remote_exec.command` 必须符合 Agent 声明的方言。网关至少校验 `shell.v1/exec` 返回的 `stdout: string`、`stderr: string` 和 `exit_code: integer`。
 - stdout 与 stderr 各最多捕获 2 MiB，超出部分附加截断标记；超时、取消、断线和心跳失活必须清理命令进程树及 Hub 中的连接和挂起请求。
 
@@ -97,6 +99,6 @@
 
 ## 最终验收闭环
 
-新用户可以注册登录，通过 Agent 工作台组装 ZIP 并获得一次性 Agent Token，在另一台机器运行启动命令；网页显示 Agent 在线及其操作系统和 Shell 方言；Claude 或 WorkBuddy 使用 MCP Access Key 连接网关，调用 `list_agents` 找到该 Agent，调用 `get_agent_capabilities` 获取完整契约和运行时方言，并通过 `remote_exec` 成功执行符合该方言的目录查询等命令并获得结果。
+新用户可以注册登录，通过 Agent 工作台组装 ZIP 并获得一次性 Agent Token，在另一台机器运行启动命令；网页显示 Agent 在线、版本状态、构建 ID、操作系统和 Shell 方言；Claude 或 WorkBuddy 使用 MCP Access Key 连接网关，调用 `list_agents` 找到该 Agent，调用 `get_agent_capabilities` 获取版本、完整契约和运行时方言，并通过 `remote_exec` 成功执行符合该方言的目录查询等命令并获得结果。
 
 请直接开始实施，自主推进到上述闭环真正可运行并经过验证。

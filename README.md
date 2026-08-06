@@ -42,6 +42,17 @@ Agent 会在注册与重连握手中上报操作系统、方言和可执行文�
 
 Agent WebSocket 协议当前为 v2，不兼容早期未携带结构化 Profile 运行时信息的脚本；请重新从工作台组装 Agent。
 
+### Agent 版本信息
+
+每个 Agent 在握手时上报以下版本信息，网关会持久化并显示版本状态：
+
+- `agent_version`：Agent 发布版本，例如 `0.1.0`
+- `core_version`：Core 数据与行为版本
+- `protocol_version`：Agent WebSocket 协议版本
+- `build_id`：工作台每次组装生成的唯一构建 ID；源码运行使用 `source-dev`
+
+网页和 MCP 会将 Agent 标记为“当前版本”“需要升级”“协议不兼容”“高于网关版本”或“未知版本”。第一版只提供版本可见性，不实现 Agent 自动更新。
+
 ## 本地启动
 
 需要 Python 3.11 或更高版本。

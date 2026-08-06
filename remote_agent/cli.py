@@ -42,6 +42,7 @@ async def async_main(default_config: Path | None = None) -> None:
         enrollment_token=args.token,
         name=(args.name.strip() if args.name else manifest.name) or socket.gethostname(),
         description=args.description.strip() if args.description is not None else manifest.description,
+        build_id=manifest.build_id,
         handlers=handlers,
     )
     await agent.run_forever()

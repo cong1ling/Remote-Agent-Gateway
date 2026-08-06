@@ -15,9 +15,9 @@ from remote_agent.profiles.base import ProfileHandler
 
 from .config import AgentConfig
 from .errors import FatalAgentError
+from .version import AGENT_VERSION, CORE_VERSION, PROTOCOL_VERSION
 
 
-PROTOCOL_VERSION = 2
 RECONNECT_MIN_SECONDS = 2
 RECONNECT_MAX_SECONDS = 30
 
@@ -30,6 +30,7 @@ class RemoteAgent:
         enrollment_token: str | None,
         name: str,
         description: str,
+        build_id: str,
         handlers: dict[str, ProfileHandler],
     ):
         if not handlers:
@@ -39,6 +40,7 @@ class RemoteAgent:
         self.enrollment_token = enrollment_token
         self.name = name
         self.description = description
+        self.build_id = build_id
         self.handlers = handlers
         self.running: dict[str, asyncio.Task[None]] = {}
         self.request_profiles: dict[str, str] = {}
@@ -57,6 +59,12 @@ class RemoteAgent:
             "v": PROTOCOL_VERSION,
             "type": "hello",
             "profiles": self.profile_declarations,
+            "version": {
+                "agent_version": AGENT_VERSION,
+                "core_version": CORE_VERSION,
+                "protocol_version": PROTOCOL_VERSION,
+                "build_id": self.build_id,
+            },
             "metadata": {
                 "hostname": socket.gethostname(),
                 "platform": platform.platform(),
@@ -161,7 +169,11 @@ class RemoteAgent:
                 f"{declaration['id']} [{declaration['runtime'].get('dialect', 'unknown')}]"
                 for declaration in self.profile_declarations
             )
-            print(f"Agent 已连接: {self.gateway_url} ({profile_summary})", flush=True)
+            print(
+                f"Agent {AGENT_VERSION} ({self.build_id}) 已连接: "
+                f"{self.gateway_url} ({profile_summary})",
+                flush=True,
+            )
             async for raw_message in websocket:
                 message = json.loads(raw_message)
                 if not isinstance(message, dict) or message.get("v") != PROTOCOL_VERSION:

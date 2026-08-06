@@ -85,6 +85,7 @@ class Database:
                     name TEXT NOT NULL,
                     description TEXT NOT NULL DEFAULT '',
                     profiles_json TEXT NOT NULL,
+                    version_json TEXT NOT NULL DEFAULT '{}',
                     credential_prefix TEXT NOT NULL,
                     credential_hash TEXT NOT NULL UNIQUE,
                     created_at INTEGER NOT NULL,
@@ -108,6 +109,13 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_agent_bundles_user ON agent_bundles(user_id);
                 """
             )
+            agent_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(agents)").fetchall()
+            }
+            if "version_json" not in agent_columns:
+                connection.execute(
+                    "ALTER TABLE agents ADD COLUMN version_json TEXT NOT NULL DEFAULT '{}'"
+                )
 
     @staticmethod
     def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -285,6 +293,7 @@ class Database:
         name: str,
         description: str,
         profile_declarations: list[dict[str, Any]],
+        version: dict[str, Any],
     ) -> dict[str, Any] | None:
         now = int(time.time())
         with self.connect() as connection:
@@ -305,9 +314,9 @@ class Database:
             connection.execute(
                 """
                 INSERT INTO agents
-                    (id, user_id, name, description, profiles_json, credential_prefix,
-                     credential_hash, created_at, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, user_id, name, description, profiles_json, version_json,
+                     credential_prefix, credential_hash, created_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     agent_id,
@@ -315,6 +324,7 @@ class Database:
                     name,
                     description,
                     json.dumps(profile_declarations, separators=(",", ":")),
+                    json.dumps(version, separators=(",", ":")),
                     credential_prefix,
                     credential_hash,
                     now,
@@ -327,7 +337,8 @@ class Database:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, user_id, name, description, profiles_json, created_at, last_seen_at
+                SELECT id, user_id, name, description, profiles_json, version_json,
+                       created_at, last_seen_at
                 FROM agents
                 WHERE id = ? AND credential_hash = ? AND revoked_at IS NULL
                 """,
@@ -354,15 +365,27 @@ class Database:
         )
         result["profile_declarations"] = declarations
         result["profiles"] = [declaration["id"] for declaration in declarations]
+        raw_version = json.loads(result.pop("version_json"))
+        result["version"] = raw_version if isinstance(raw_version, dict) else {}
         return result
 
-    def update_agent_profile_declarations(
-        self, agent_id: str, declarations: list[dict[str, Any]]
+    def update_agent_runtime(
+        self,
+        agent_id: str,
+        declarations: list[dict[str, Any]],
+        version: dict[str, Any],
     ) -> None:
         with self.connect() as connection:
             connection.execute(
-                "UPDATE agents SET profiles_json = ? WHERE id = ? AND revoked_at IS NULL",
-                (json.dumps(declarations, separators=(",", ":")), agent_id),
+                """
+                UPDATE agents SET profiles_json = ?, version_json = ?
+                WHERE id = ? AND revoked_at IS NULL
+                """,
+                (
+                    json.dumps(declarations, separators=(",", ":")),
+                    json.dumps(version, separators=(",", ":")),
+                    agent_id,
+                ),
             )
 
     def touch_agent(self, agent_id: str) -> None:
@@ -375,8 +398,8 @@ class Database:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, user_id, name, description, profiles_json, created_at,
-                       last_seen_at, revoked_at
+                SELECT id, user_id, name, description, profiles_json, version_json,
+                       created_at, last_seen_at, revoked_at
                 FROM agents
                 WHERE user_id = ? AND revoked_at IS NULL
                 ORDER BY created_at DESC
@@ -389,8 +412,8 @@ class Database:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, user_id, name, description, profiles_json, created_at,
-                       last_seen_at, revoked_at
+                SELECT id, user_id, name, description, profiles_json, version_json,
+                       created_at, last_seen_at, revoked_at
                 FROM agents WHERE id = ? AND user_id = ? AND revoked_at IS NULL
                 """,
                 (agent_id, user_id),

@@ -22,6 +22,12 @@ SHELL_DECLARATIONS = [
         },
     }
 ]
+AGENT_VERSION = {
+    "agent_version": "0.1.0",
+    "core_version": 1,
+    "protocol_version": 2,
+    "build_id": "web-test-build",
+}
 
 
 class WebApiTests(unittest.TestCase):
@@ -86,6 +92,7 @@ class WebApiTests(unittest.TestCase):
             "name": "GPU Notebook",
             "description": "模型训练环境",
             "profiles": SHELL_DECLARATIONS,
+            "version": AGENT_VERSION,
         }
         with self.client.websocket_connect("/ws/agent") as websocket:
             websocket.send_json(hello)
@@ -97,6 +104,8 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(agents[0]["capabilities"], ["远程 Shell"])
             self.assertEqual(agents[0]["profile_declarations"], SHELL_DECLARATIONS)
             self.assertFalse(agents[0]["requires_reenrollment"])
+            self.assertEqual(agents[0]["version"], AGENT_VERSION)
+            self.assertEqual(agents[0]["version_status"], "current")
             details = self.client.get(f"/api/agents/{agents[0]['id']}").json()["agent"]
             self.assertEqual(details["profile_details"][0]["runtime"]["dialect"], "powershell")
             action = details["profile_details"][0]["actions"][0]
@@ -162,6 +171,23 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("协议版本不兼容", error["error"])
         self.assertIn("重新下载新版 Agent", error["error"])
 
+    def test_protocol_v2_requires_version_metadata(self) -> None:
+        self.register()
+        created = self.client.post("/api/enrollment-tokens", json={"name": "No Version"})
+        with self.client.websocket_connect("/ws/agent") as websocket:
+            websocket.send_json(
+                {
+                    "v": 2,
+                    "type": "hello",
+                    "enrollment_token": created.json()["secret"],
+                    "name": "No Version",
+                    "description": "",
+                    "profiles": SHELL_DECLARATIONS,
+                }
+            )
+            error = websocket.receive_json()
+        self.assertIn("缺少版本信息", error["error"])
+
     def test_agent_is_hidden_from_another_user(self) -> None:
         self.register()
         created = self.client.post("/api/enrollment-tokens", json={"name": "Private Agent"})
@@ -172,6 +198,7 @@ class WebApiTests(unittest.TestCase):
             "name": "Private Agent",
             "description": "",
             "profiles": SHELL_DECLARATIONS,
+            "version": AGENT_VERSION,
         }
         with self.client.websocket_connect("/ws/agent") as websocket:
             websocket.send_json(hello)

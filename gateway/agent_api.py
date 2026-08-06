@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .agent_hub import AgentConnection, AgentHub
-from .agent_protocol import AGENT_PROTOCOL_VERSION
+from .agent_protocol import AGENT_PROTOCOL_VERSION, validate_agent_version
 from .database import Database
 from .profiles import profile_ids, validate_profile_declarations
 from .security import hash_token, issue_token
@@ -37,6 +37,7 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
             )
         profile_declarations = validate_profile_declarations(hello.get("profiles"))
         profiles = profile_ids(profile_declarations)
+        version = validate_agent_version(hello.get("version"), AGENT_PROTOCOL_VERSION)
 
         enrollment_token = hello.get("enrollment_token")
         if isinstance(enrollment_token, str) and enrollment_token:
@@ -52,6 +53,7 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
                 name,
                 description,
                 profile_declarations,
+                version,
             )
             if registered is None:
                 raise ValueError("注册令牌无效、已过期或已被使用")
@@ -72,7 +74,7 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
                 raise ValueError("Agent 设备凭据无效或已被撤销")
             if agent["profiles"] != profiles:
                 raise ValueError("Agent Profile 与注册记录不一致，请重新注册 Agent")
-            db.update_agent_profile_declarations(agent_id, profile_declarations)
+            db.update_agent_runtime(agent_id, profile_declarations, version)
             user_id = agent["user_id"]
             await websocket.send_json(
                 {"v": AGENT_PROTOCOL_VERSION, "type": "ready", "agent_id": agent_id}

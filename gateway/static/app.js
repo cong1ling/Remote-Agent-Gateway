@@ -131,13 +131,33 @@ function shellRuntimeLabel(agent) {
   return `${osName} · ${shellName}`;
 }
 
+function agentVersionView(agent) {
+  const version = agent.version || {};
+  if (!version.agent_version) return { text: "版本未知", status: "unknown", label: "未知版本" };
+  const build = String(version.build_id || "");
+  const buildLabel = build ? ` · Build ${build.slice(0, 8)}` : "";
+  const labels = {
+    current: "当前版本",
+    update_available: "需要升级",
+    incompatible: "协议不兼容",
+    newer: "高于网关版本",
+    unknown: "未知版本",
+  };
+  return {
+    text: `Agent ${version.agent_version} · Core ${version.core_version} · Protocol ${version.protocol_version}${buildLabel}`,
+    status: agent.version_status || "unknown",
+    label: labels[agent.version_status] || labels.unknown,
+  };
+}
+
 function agentCard(agent) {
   const profiles = (agent.profiles || []).map((profile) => `<span class="profile">${escapeHtml(profile)}</span>`).join("");
   const shellRuntime = shellRuntimeLabel(agent);
   const upgrade = agent.requires_reenrollment ? '<span class="upgrade-badge">需重新注册</span>' : "";
+  const version = agentVersionView(agent);
   return `<article class="agent-card">
-    <div class="agent-title"><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.description || "暂无用途描述")}</p></div>
-    <div class="agent-meta"><span class="status ${agent.online ? "online" : ""}">${agent.online ? "在线" : "离线"}</span>${upgrade}${profiles}${shellRuntime ? `<span class="runtime-badge">${escapeHtml(shellRuntime)}</span>` : ""}<span>${formatTime(agent.last_seen_at)}</span></div>
+    <div class="agent-title"><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.description || "暂无用途描述")}</p><small>${escapeHtml(version.text)}</small></div>
+    <div class="agent-meta"><span class="status ${agent.online ? "online" : ""}">${agent.online ? "在线" : "离线"}</span><span class="version-badge ${escapeHtml(version.status)}">${escapeHtml(version.label)}</span>${upgrade}${profiles}${shellRuntime ? `<span class="runtime-badge">${escapeHtml(shellRuntime)}</span>` : ""}<span>${formatTime(agent.last_seen_at)}</span></div>
     <div class="row-actions"><button class="secondary" data-edit-agent="${agent.id}">编辑</button><button class="danger" data-revoke-agent="${agent.id}">撤销</button></div>
   </article>`;
 }

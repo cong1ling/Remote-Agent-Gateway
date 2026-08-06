@@ -11,6 +11,12 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 
 from .agent_hub import AgentCommandError, AgentHub, AgentOfflineError
+from .agent_protocol import (
+    AGENT_PROTOCOL_VERSION,
+    CURRENT_AGENT_VERSION,
+    CURRENT_CORE_VERSION,
+    agent_version_status,
+)
 from .config import Settings
 from .database import Database
 from .profiles import (
@@ -54,6 +60,8 @@ def _agent_summary(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
         "capabilities": profile_names(agent["profiles"]),
         "profile_declarations": agent["profile_declarations"],
         "requires_reenrollment": not agent["profile_declarations"],
+        "version": agent["version"],
+        "version_status": agent_version_status(agent["version"]),
         "last_seen_at": agent["last_seen_at"],
     }
 
@@ -107,6 +115,11 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             "profiles": describe_profile_declarations(agent["profile_declarations"]),
             "gateway_limits": {
                 "max_command_timeout_seconds": settings.max_command_timeout,
+            },
+            "current_agent_release": {
+                "agent_version": CURRENT_AGENT_VERSION,
+                "core_version": CURRENT_CORE_VERSION,
+                "protocol_version": AGENT_PROTOCOL_VERSION,
             },
         }
 

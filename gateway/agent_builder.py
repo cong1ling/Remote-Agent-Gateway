@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 
 import remote_agent
+from remote_agent.core.version import AGENT_VERSION, CORE_VERSION
 
 from .profiles import PROFILE_REGISTRY, validate_profiles
 
@@ -48,7 +49,9 @@ class PythonAgentBuilder:
         archive_root = filename.removesuffix(".zip")
         manifest = {
             "runtime": self.runtime,
-            "core_version": 1,
+            "agent_version": AGENT_VERSION,
+            "core_version": CORE_VERSION,
+            "build_id": bundle_id,
             "profiles": selected,
             "agent": {"name": name, "description": description},
         }
