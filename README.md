@@ -42,6 +42,13 @@ $env:GATEWAY_PUBLIC_URL = "http://127.0.0.1:8000"
 
 打开 <http://127.0.0.1:8000>，注册账号后按以下顺序操作：
 
+### 两种 Agent 接入方式
+
+- **Agent 工作台（推荐）**：面向普通用户，一次完成 Profile 选择、Python Agent ZIP 组装和 Enrollment Token 签发。
+- **手动接入（高级）**：只签发 Enrollment Token，不生成 Agent 文件。仅适用于已经持有 Agent 程序、开发自定义 Handler 或使用自动化部署的用户。
+
+两条路径不需要同时使用。首次接入通常只使用 Agent 工作台。
+
 1. 在“Agent 工作台”中填写名称和用途，选择 Profile 并组装。
 2. 解压自动下载的 ZIP，在远程环境执行 `python -m pip install -r requirements.txt`。
 3. 运行页面单独展示的一次性 Agent 启动命令。

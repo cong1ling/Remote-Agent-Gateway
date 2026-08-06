@@ -86,7 +86,7 @@ function agentCard(agent) {
 }
 
 function renderAgents() {
-  const content = state.agents.length ? state.agents.map(agentCard).join("") : emptyState("还没有 Agent", "创建一次性注册令牌并在远程环境运行启动命令");
+  const content = state.agents.length ? state.agents.map(agentCard).join("") : emptyState("还没有 Agent", "前往 Agent 工作台组装并注册第一台远程设备");
   $("#agents-list").innerHTML = content;
   $("#overview-agents").innerHTML = state.agents.length ? state.agents.slice(0, 4).map(agentCard).join("") : content;
 }
@@ -127,7 +127,7 @@ function renderTokens() {
       <time>有效期至 ${formatTime(token.expires_at)}</time>
       <div class="row-actions">${active ? `<button class="danger" data-revoke-token="${token.id}">撤销</button>` : ""}</div>
     </article>`;
-  }).join("") : emptyState("还没有注册令牌", "创建令牌后只会展示一次完整启动命令");
+  }).join("") : emptyState("还没有手动接入 Token", "普通用户无需在这里操作，请优先使用 Agent 工作台");
 }
 
 function renderBuilder() {
@@ -157,7 +157,7 @@ function render() {
 }
 
 function switchView(view) {
-  const titles = { overview: "概览", builder: "Agent 工作台", agents: "远程 Agent", keys: "MCP Keys", tokens: "注册令牌" };
+  const titles = { overview: "概览", builder: "Agent 工作台", agents: "远程 Agent", keys: "MCP Keys", tokens: "手动接入" };
   state.view = view;
   $$("#main-nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `view-${view}`));
@@ -193,7 +193,7 @@ async function createKey(name) {
 
 async function createToken(name) {
   const result = await api("/enrollment-tokens", { method: "POST", body: JSON.stringify({ name }) });
-  showSecret("Agent 注册令牌已创建", result.secret, result.command);
+  showSecret("手动接入 Token 已创建", result.secret, result.command);
   await loadAll(true);
 }
 
@@ -247,7 +247,8 @@ function bindEvents() {
   $$("#main-nav button").forEach((button) => button.onclick = () => switchView(button.dataset.view));
   $("#new-key-button").onclick = () => openForm({ eyebrow: "MCP Access", title: "创建 MCP Key", submit: "创建 Key", fields: '<label>名称<input name="name" required maxlength="80" placeholder="例如 Claude Desktop"></label>', onSubmit: (data) => createKey(data.get("name")) });
   $$('[data-action="new-bundle"]').forEach((button) => button.onclick = openBundleForm);
-  $$('[data-action="new-token"]').forEach((button) => button.onclick = () => openForm({ eyebrow: "Agent Enrollment", title: "创建注册令牌", submit: "创建令牌", fields: '<label>Agent 名称<input name="name" required maxlength="80" placeholder="例如 GPU Notebook"></label>', onSubmit: (data) => createToken(data.get("name")) }));
+  $$('[data-action="new-token"]').forEach((button) => button.onclick = () => openForm({ eyebrow: "Advanced Enrollment", title: "创建手动接入 Token", submit: "创建 Token", fields: '<label>令牌名称或备注<input name="name" required maxlength="80" placeholder="例如 CI 临时环境"></label>', onSubmit: (data) => createToken(data.get("name")) }));
+  $$('[data-action="go-builder"]').forEach((button) => button.onclick = () => switchView("builder"));
   $("#dialog-form").onsubmit = async (event) => {
     event.preventDefault();
     if (event.submitter?.value === "cancel") { $("#form-dialog").close(); return; }

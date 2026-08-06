@@ -90,6 +90,16 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(error["type"], "error")
             self.assertIn("已过期或已被使用", error["error"])
 
+    def test_manual_enrollment_only_issues_token_and_source_command(self) -> None:
+        self.register()
+        created = self.client.post("/api/enrollment-tokens", json={"name": "CI Manual"})
+        self.assertEqual(created.status_code, 201, created.text)
+        payload = created.json()
+        self.assertTrue(payload["secret"].startswith("enroll_"))
+        self.assertIn("python agent.py", payload["command"])
+        self.assertNotIn("--name", payload["command"])
+        self.assertEqual(self.client.get("/api/agent-bundles").json()["bundles"], [])
+
     def test_agent_is_hidden_from_another_user(self) -> None:
         self.register()
         created = self.client.post("/api/enrollment-tokens", json={"name": "Private Agent"})
@@ -123,6 +133,13 @@ class WebApiTests(unittest.TestCase):
         payload = created.json()
         self.assertTrue(payload["secret"].startswith("enroll_"))
         self.assertIn("python run.py", payload["command"])
+        token_prefix = payload["secret"][:14]
+        token_record = next(
+            item
+            for item in self.client.get("/api/enrollment-tokens").json()["tokens"]
+            if item["prefix"] == token_prefix
+        )
+        self.assertEqual(token_record["expires_at"], payload["bundle"]["expires_at"])
 
         download = self.client.get(payload["bundle"]["download_url"])
         self.assertEqual(download.status_code, 200, download.text)

@@ -43,10 +43,10 @@
       <div class="sidebar-brand"><span class="brand-mark small">RG</span><strong>Remote Gateway</strong></div>
       <nav id="main-nav" aria-label="主导航">
         <button class="active" data-view="overview" type="button"><span>01</span>概览</button>
-        <button data-view="builder" type="button"><span>02</span>Agent 工作台</button>
+        <button data-view="builder" type="button"><span>02</span>Agent 工作台（推荐）</button>
         <button data-view="agents" type="button"><span>03</span>远程 Agent</button>
         <button data-view="keys" type="button"><span>04</span>MCP Keys</button>
-        <button data-view="tokens" type="button"><span>05</span>注册令牌</button>
+        <button data-view="tokens" type="button"><span>05</span>手动接入</button>
       </nav>
       <div class="sidebar-foot">
         <span id="user-email"></span>
@@ -93,7 +93,8 @@
         </section>
 
         <section id="view-tokens" class="view">
-          <div class="section-heading"><div><h2>Agent 注册令牌</h2><p>一次性令牌用于把新的远程环境绑定到当前账号</p></div><button class="primary" data-action="new-token" type="button">创建令牌</button></div>
+          <div class="section-heading"><div><h2>手动接入（高级）</h2><p>只签发一次性 Enrollment Token，不生成 Agent 文件</p></div><button class="primary" data-action="new-token" type="button">仅创建 Token</button></div>
+          <div class="manual-notice"><div><strong>通常请使用 Agent 工作台</strong><p>只有已经持有 Agent 程序、正在开发 Handler 或使用自动化部署时，才需要在这里单独创建 Token。</p></div><button class="secondary" data-action="go-builder" type="button">前往工作台</button></div>
           <div id="tokens-list" class="data-list"></div>
         </section>
       </main>

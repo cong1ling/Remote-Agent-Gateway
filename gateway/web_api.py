@@ -10,7 +10,7 @@ from .agent_hub import AgentHub
 from .config import Settings
 from .database import ConflictError, Database
 from .profiles import describe_profiles, profile_names, public_profile_catalog, validate_profiles
-from .security import hash_password, hash_token, issue_token, verify_password
+from .security import IssuedToken, hash_password, hash_token, issue_token, verify_password
 
 
 SESSION_COOKIE = "remote_gateway_session"
@@ -58,6 +58,20 @@ def create_web_router(db: Database, settings: Settings, hub: AgentHub) -> APIRou
     def cleanup_expired_bundles() -> None:
         for filename in db.cleanup_expired_agent_bundles():
             (settings.bundles_dir / filename).unlink(missing_ok=True)
+
+    def issue_agent_enrollment(
+        user_id: str, label: str
+    ) -> tuple[IssuedToken, dict[str, Any], int]:
+        token = issue_token("enroll")
+        expires_at = int(time.time()) + settings.enrollment_minutes * 60
+        record = db.create_enrollment_token(
+            user_id,
+            label,
+            token.prefix,
+            token.digest,
+            expires_at,
+        )
+        return token, record, expires_at
 
     def current_user(
         session_token: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
@@ -160,14 +174,10 @@ def create_web_router(db: Database, settings: Settings, hub: AgentHub) -> APIRou
 
     @router.post("/enrollment-tokens", status_code=201)
     def create_enrollment_token(item: NamedItem, user: User) -> dict[str, Any]:
-        token = issue_token("enroll")
-        expires_at = int(time.time()) + settings.enrollment_minutes * 60
-        record = db.create_enrollment_token(
-            user["id"], item.name.strip(), token.prefix, token.digest, expires_at
-        )
+        token, record, _ = issue_agent_enrollment(user["id"], item.name.strip())
         command = (
             f'python agent.py --gateway "{settings.websocket_url}" '
-            f'--token "{token.value}" --name "{item.name.strip()}"'
+            f'--token "{token.value}"'
         )
         return {"token": record, "secret": token.value, "command": command}
 
@@ -215,12 +225,10 @@ def create_web_router(db: Database, settings: Settings, hub: AgentHub) -> APIRou
         except (ValueError, AgentBuildError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        enrollment = issue_token("enroll")
-        expires_at = int(time.time()) + settings.enrollment_minutes * 60
         token_record: dict[str, Any] | None = None
         try:
-            token_record = db.create_enrollment_token(
-                user["id"], f"Agent Bundle: {name}", enrollment.prefix, enrollment.digest, expires_at
+            enrollment, token_record, expires_at = issue_agent_enrollment(
+                user["id"], f"Agent Bundle: {name}"
             )
             bundle = db.create_agent_bundle(
                 bundle_id,
