@@ -127,6 +127,8 @@ remote_agent/
 └── profiles/   # 标准能力 Handler
 ```
 
+后续扩展标准能力前，请先阅读 [Profile 开发规范](PROFILE_DEVELOPMENT.md)，尤其是“现有 Profile 无法表达”这一准入条件。
+
 ## MCP 配置
 
 不同客户端的配置文件位置不同，核心配置如下：

@@ -74,8 +74,10 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
     server = FastMCP(
         "Remote Agent Gateway",
         instructions=(
-            "管理并操作当前用户拥有的远程 Agent。先调用 list_agents 选择在线设备，"
-            "需要了解设备能力时调用 get_agent_capabilities，再调用 remote_exec。"
+            "管理并操作当前用户拥有的远程 Agent。先调用 list_agents 选择目标设备；"
+            "调用任何 Agent 专属工具前，必须先对目标 agent_id 调用 get_agent_capabilities。"
+            "只有能力详情中的 Profile Action 明确列出当前工具的 mcp_tool 时才能调用，"
+            "网关会在调用时再次校验。"
         ),
         token_verifier=DatabaseTokenVerifier(db),
         auth=AuthSettings(
@@ -105,7 +107,8 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
     @server.tool(
         description=(
             "查询指定 Agent 的标准能力、可用操作、限制及每个操作对应的固定 MCP 工具。"
-            "调用远程操作前可用它确认能力和调用入口。"
+            "调用任何 Agent 专属工具前必须先调用它确认能力和调用入口；"
+            "不要仅根据 tools/list 推断某个 Agent 支持哪些能力。"
         )
     )
     async def get_agent_capabilities(agent_id: str, ctx: Context) -> dict[str, Any]:
@@ -131,6 +134,9 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
     @server.tool(
         description=(
             "在指定在线 Agent 上执行 Shell 命令，并返回 stdout、stderr 和 exit_code。"
+            "调用前必须先对该 agent_id 调用 get_agent_capabilities；"
+            "只有 Agent 声明了 shell.v1，且 shell.v1/exec 的 mcp_tool 明确为 remote_exec 时才能调用，"
+            "网关会再次校验。"
             "command 必须符合 get_agent_capabilities 返回的 Shell 方言。"
             "该能力拥有 Agent 所在系统账号的完整 Shell 权限。"
         )
