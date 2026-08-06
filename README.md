@@ -12,33 +12,52 @@ Python Gateway ---- Web UI / SQLite
 Remote Agent
 ```
 
-远程 Agent 不是 MCP Server。MCP 只运行在网关，远程端只保留连接 Core 和实际能力 Handler；第一版仅包含 `shell.v1`。
+远程 Agent 不是 MCP Server。MCP 只运行在网关，远端只运行一个轻量执行器和它实际拥有的能力。
 
-## Profile 与 Handler
+这个项目想解决的事情很简单：让 AI 能够在没有 SSH、没有入站端口、甚至没有公网 IP 的环境里，按需连接并操作你自己的设备。网关负责 MCP、认证、能力发现和路由；远端只需要主动建立一条连接。
 
-Profile 是网关维护的跨平台能力契约，不是某种编程语言的插件、操作系统名称或设备型号。它规定 AI 能调用什么、参数与返回值是什么以及有哪些限制；Handler 负责在具体环境中实现这份契约。
+## 为什么不是每台设备都直接运行 MCP
 
-一个 Profile 可以包含多个语义相关的 Action，每个对 AI 开放的 Action 映射到一个固定的网关 MCP 工具：
+让每台电脑、手机或摄像头都直接暴露 MCP，意味着每台设备都要处理协议、TLS、秘钥、工具描述、客户端连接和升级。设备越多，维护和攻击面越大；对内存有限的设备更不现实。
+
+Remote Agent Gateway 把复杂部分集中在一个网关里：
 
 ```text
-Profile（固定契约）
-├── Action A → 固定 MCP 工具 A
-└── Action B → 固定 MCP 工具 B
-
-Handler（具体实现）
-├── Python / Windows
-├── Go / Linux
-├── Rust / 嵌入式系统
-└── 移动端原生 API
+Claude / WorkBuddy
+        | MCP Streamable HTTP
+        v
+统一网关：认证、能力目录、用户隔离、请求路由
+        ^
+        | Agent 主动出站连接（WS / WSS）
+轻量 Agent：只实现实际加载的标准 Profile
+        |
+        └── 电脑、服务器、CI、手机、摄像头或其他设备
 ```
 
-实现方式可以不同，但外部行为必须一致。官方 Python Agent 提供通用 Handler；其他实现可以使用 Go、Rust、C 或平台原生 API，只要仍然遵守同一个 Profile 契约。无法完整实现契约的环境不能声明该 Profile，修改了语义的自定义实现也不能继续使用原 Profile ID。
+一句话概括：MCP 只运行一次，能力可以运行在任何地方。
 
-`shell.v1` 已经使用了这套模型：它统一规定 `command → stdout/stderr/exit_code`，具体 Agent 再声明 PowerShell、CMD 或 POSIX sh 方言。命令语言无法跨系统完全统一，因此 AI 必须按 `get_agent_capabilities` 返回的 runtime 方言生成命令。
+## 核心工作流
 
-未来若增加 `workspace.v1`，可以在同一个 Profile 下定义语义相关的 `read`、`write`、`edit` Action。协议统一相对路径、文本编码、冲突和写入结果，Python、Rust 或移动端 Handler 各自使用本地文件 API 实现；没有可写文件系统的设备则不声明它。`workspace.v1` 当前仍是候选设计，尚未包含在已发布能力中。
+网关不会为每台 Agent 动态生成一套 MCP 工具，而是保持少量稳定的固定入口：
 
-Profile 的新增准入条件、版本和实现流程见 [Profile 开发规范](PROFILE_DEVELOPMENT.md)。
+```text
+发现 Agent
+    → 查询 Agent 的 Profile 和详细契约
+    → 根据能力详情中的 mcp_tool 调用固定工具
+```
+
+Profile 是网关定义的能力契约，一个 Profile 可以包含多个语义相关的 Action。Agent 只能声明自己真正加载并实现的 Profile；不同语言和平台可以使用不同 Handler，只要对外行为遵守同一份契约即可。
+
+## 未来构想
+
+第一阶段先把 `shell.v1` 做稳，后续沿着“网关统一、远端极简”的路线扩展：
+
+- `workspace.v1`（设计中）：在统一文本契约下提供 `read`、`write`、`edit`，让 AI 更可靠地处理工作区文件；它不是通用上传下载系统。
+- 手机与移动端 Agent（规划中）：手机只暴露明确、受限的设备能力；设备太弱时，Agent 也可以运行在旁边的电脑、路由器或 NAS 上。
+- 摄像头与边缘设备（规划中）：控制、状态和快照可以成为标准 Profile；实时视频等大数据会走独立媒体通道，不塞进普通 MCP 调用。
+- 多语言与嵌入式实现（规划中）：用 Go、Rust、C 或平台原生 API 重写轻量 Agent，网关和 AI 侧的 MCP 入口保持不变。
+
+这些方向是产品路线，不代表当前版本已经提供对应能力。新增 Profile 前，必须先证明现有 Profile 无法诚实表达需求；具体约束见 [Profile 开发规范](PROFILE_DEVELOPMENT.md)。
 
 ## 当前能力
 
