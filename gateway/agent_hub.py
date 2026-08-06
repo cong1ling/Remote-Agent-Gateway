@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import WebSocket
+from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
 from .agent_protocol import AGENT_PROTOCOL_VERSION
 
@@ -20,6 +21,10 @@ class AgentOfflineError(AgentError):
 
 
 class AgentCommandError(AgentError):
+    pass
+
+
+class AgentBusyError(AgentCommandError):
     pass
 
 
@@ -99,6 +104,14 @@ class AgentHub:
         async with self._lock:
             if self._connections.get(agent_id) is not connection:
                 raise AgentOfflineError("Agent 当前离线")
+            active_requests = sum(
+                1 for pending in self._pending.values() if pending.agent_id == agent_id
+            )
+            if active_requests >= MAX_CONCURRENT_REQUESTS_PER_AGENT:
+                raise AgentBusyError(
+                    "Agent 当前忙碌；每台 Agent 最多同时执行 "
+                    f"{MAX_CONCURRENT_REQUESTS_PER_AGENT} 个请求"
+                )
             self._pending[request_id] = PendingRequest(agent_id=agent_id, future=future)
 
         try:

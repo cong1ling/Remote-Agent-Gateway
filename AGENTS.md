@@ -85,6 +85,7 @@
 - 每个对 AI 开放的 Profile Action 必须声明对应的固定 `mcp_tool`，并通过 `get_agent_capabilities` 和网页协议详情暴露。映射到的工具必须真实存在于 MCP `tools/list`；不得按 Agent 动态注册工具，也不使用万能 `remote_call` 代替清晰、强类型的标准工具。
 - `remote_exec.command` 必须符合 Agent 声明的方言。网关至少校验 `shell.v1/exec` 返回的 `stdout: string`、`stderr: string` 和 `exit_code: integer`。
 - stdout 与 stderr 各最多捕获 2 MiB，超出部分附加截断标记；超时、取消、断线和心跳失活必须清理命令进程树及 Hub 中的连接和挂起请求。
+- 第一版在网关和官方 Agent 两侧都硬性限制每台 Agent 最多同时执行 5 个请求，超过上限立即返回忙碌错误而不排队。代码中必须保留 TODO，后续改为可配置的每 Agent 策略。
 
 ## 第一版暂不实现
 

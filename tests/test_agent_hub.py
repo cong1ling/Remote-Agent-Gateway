@@ -4,7 +4,8 @@ import asyncio
 import unittest
 from typing import Any
 
-from gateway.agent_hub import AgentConnection, AgentHub, AgentOfflineError
+from gateway.agent_hub import AgentBusyError, AgentConnection, AgentHub, AgentOfflineError
+from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
 
 class FakeWebSocket:
@@ -81,6 +82,57 @@ class AgentHubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.hub.is_online("agent-a"))
         with self.assertRaises(AgentOfflineError):
             await task
+
+    async def test_concurrent_request_limit_is_per_agent_and_releases_slots(self) -> None:
+        tasks = [
+            asyncio.create_task(
+                self.hub.execute(
+                    "agent-a",
+                    "shell.v1",
+                    "exec",
+                    {"command": str(index)},
+                    2,
+                )
+            )
+            for index in range(MAX_CONCURRENT_REQUESTS_PER_AGENT)
+        ]
+        await asyncio.sleep(0)
+        self.assertEqual(len(self.socket_a.messages), MAX_CONCURRENT_REQUESTS_PER_AGENT)
+
+        with self.assertRaisesRegex(AgentBusyError, "Agent 当前忙碌"):
+            await self.hub.execute(
+                "agent-a", "shell.v1", "exec", {"command": "overflow"}, 2
+            )
+
+        other_agent = asyncio.create_task(
+            self.hub.execute("agent-b", "shell.v1", "exec", {"command": "ok"}, 2)
+        )
+        await asyncio.sleep(0)
+        request_b = self.socket_b.messages[-1]["request_id"]
+        await self.hub.resolve(
+            "agent-b",
+            {"type": "result", "request_id": request_b, "ok": True, "result": {}},
+        )
+        self.assertEqual(await other_agent, {})
+
+        first_request = self.socket_a.messages[0]["request_id"]
+        await self.hub.resolve(
+            "agent-a",
+            {"type": "result", "request_id": first_request, "ok": True, "result": {}},
+        )
+        self.assertEqual(await tasks[0], {})
+
+        replacement = asyncio.create_task(
+            self.hub.execute(
+                "agent-a", "shell.v1", "exec", {"command": "replacement"}, 2
+            )
+        )
+        await asyncio.sleep(0)
+        self.assertEqual(len(self.socket_a.messages), MAX_CONCURRENT_REQUESTS_PER_AGENT + 1)
+
+        for task in [*tasks[1:], replacement]:
+            task.cancel()
+        await asyncio.gather(*tasks[1:], replacement, return_exceptions=True)
 
 
 if __name__ == "__main__":

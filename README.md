@@ -40,6 +40,8 @@ Remote Agent
 
 Agent 会在注册与重连握手中上报操作系统、方言和可执行文件名；`list_agents` 与 `get_agent_capabilities` 会返回这些信息。命令返回 `stdout`、`stderr` 和 `exit_code`，stdout 与 stderr 各最多保留 2 MiB，超时或取消会终止本次命令的进程树。
 
+同一台 Agent 当前最多同时处理 5 个请求。网关与官方 Agent 都会拒绝第 6 个并立即返回“Agent 当前忙碌”，不会把请求放入隐藏队列；该固定上限将在后续改为可配置的每 Agent 策略。
+
 Agent WebSocket 协议当前为 v2，不兼容早期未携带结构化 Profile 运行时信息的脚本；请重新从工作台组装 Agent。
 
 ### Agent 版本信息

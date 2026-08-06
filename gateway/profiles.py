@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
 SHELL_MAX_CAPTURE_BYTES = 2 * 1024 * 1024
 SHELL_TRUNCATION_MARKER = "\n[output truncated by remote agent]\n"
@@ -119,6 +120,7 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
             "capture_bytes_per_stream": SHELL_MAX_CAPTURE_BYTES,
             "truncation_marker": SHELL_TRUNCATION_MARKER.strip(),
             "timeout_terminates_process_tree": True,
+            "max_concurrent_requests_per_agent": MAX_CONCURRENT_REQUESTS_PER_AGENT,
         },
     }
 }

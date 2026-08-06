@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from gateway.agent_protocol import CURRENT_AGENT_VERSION, CURRENT_CORE_VERSION
 from gateway.app import create_app
 from gateway.config import Settings
+from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
 
 SHELL_DECLARATIONS = [
@@ -153,6 +154,10 @@ class WebApiTests(unittest.TestCase):
             ["timeout", "cancelled", "invalid_result"],
         )
         self.assertEqual(profile["limits"]["capture_bytes_per_stream"], 2 * 1024 * 1024)
+        self.assertEqual(
+            profile["limits"]["max_concurrent_requests_per_agent"],
+            MAX_CONCURRENT_REQUESTS_PER_AGENT,
+        )
 
     def test_old_agent_protocol_is_rejected_with_upgrade_message(self) -> None:
         self.register()

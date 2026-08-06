@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -20,6 +21,7 @@ from remote_agent.core import (
     load_manifest,
 )
 from remote_agent.core.runtime import PROTOCOL_VERSION
+from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 from remote_agent.profiles import build_profile_handlers
 from remote_agent.profiles.shell_v1 import MAX_CAPTURE_BYTES, TRUNCATION_MARKER
 
@@ -61,8 +63,8 @@ class RemoteAgentProfileTests(unittest.TestCase):
         self.assertEqual(
             hello["version"],
             {
-                "agent_version": "0.1.1",
-                "core_version": 2,
+                "agent_version": "0.1.2",
+                "core_version": 3,
                 "protocol_version": 2,
                 "build_id": "profile-test",
             },
@@ -79,6 +81,51 @@ class RemoteAgentProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(FatalAgentError):
                 build_profile_handlers(["gpio.v1"], Path(directory))
+
+
+class FakeAgentWebSocket:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def send(self, payload: str) -> None:
+        self.messages.append(json.loads(payload))
+
+
+class RemoteAgentConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_agent_rejects_request_above_local_concurrency_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = RemoteAgent(
+                gateway_url="ws://example.test/ws/agent",
+                config_store=AgentConfig(root / "config.json"),
+                enrollment_token="enroll_test",
+                name="test",
+                description="",
+                build_id="concurrency-test",
+                handlers=build_profile_handlers(["shell.v1"], root),
+            )
+            running = [asyncio.create_task(asyncio.sleep(60)) for _ in range(MAX_CONCURRENT_REQUESTS_PER_AGENT)]
+            agent.running.update({f"running-{index}": task for index, task in enumerate(running)})
+            websocket = FakeAgentWebSocket()
+            try:
+                await agent.dispatch_request(
+                    websocket,
+                    {
+                        "type": "request",
+                        "request_id": "overflow",
+                        "profile": "shell.v1",
+                        "action": "exec",
+                        "params": {"command": "pwd"},
+                    },
+                )
+            finally:
+                for task in running:
+                    task.cancel()
+                await asyncio.gather(*running, return_exceptions=True)
+        self.assertEqual(len(agent.running), MAX_CONCURRENT_REQUESTS_PER_AGENT)
+        self.assertEqual(websocket.messages[0]["request_id"], "overflow")
+        self.assertFalse(websocket.messages[0]["ok"])
+        self.assertIn("Agent 当前忙碌", websocket.messages[0]["error"])
 
 
 if __name__ == "__main__":

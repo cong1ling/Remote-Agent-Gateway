@@ -117,6 +117,7 @@ function openProfileDialog(profileId) {
     limits.capture_bytes_per_stream ? `stdout / stderr 各最多 ${formatBytes(limits.capture_bytes_per_stream)}` : "",
     limits.truncation_marker ? `截断标记：${limits.truncation_marker}` : "",
     limits.timeout_terminates_process_tree ? "超时、取消或断线会终止本次命令的整个进程树" : "",
+    limits.max_concurrent_requests_per_agent ? `同一 Agent 最多同时执行 ${limits.max_concurrent_requests_per_agent} 个请求` : "",
   ].filter(Boolean);
   $("#profile-dialog-eyebrow").textContent = `${profile.id} · ${profile.status === "stable" ? "稳定" : profile.status}`;
   $("#profile-dialog-title").textContent = `${profile.name} 协议`;

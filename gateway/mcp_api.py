@@ -9,6 +9,7 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
 from .agent_hub import AgentCommandError, AgentHub, AgentOfflineError
 from .agent_protocol import (
@@ -118,6 +119,7 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             "profiles": describe_profile_declarations(agent["profile_declarations"]),
             "gateway_limits": {
                 "max_command_timeout_seconds": settings.max_command_timeout,
+                "max_concurrent_requests_per_agent": MAX_CONCURRENT_REQUESTS_PER_AGENT,
             },
             "current_agent_release": {
                 "agent_version": CURRENT_AGENT_VERSION,

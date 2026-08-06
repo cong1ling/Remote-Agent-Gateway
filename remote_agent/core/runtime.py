@@ -15,6 +15,7 @@ from remote_agent.profiles.base import ProfileHandler
 
 from .config import AgentConfig
 from .errors import FatalAgentError
+from .limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 from .version import AGENT_VERSION, CORE_VERSION, PROTOCOL_VERSION
 
 
@@ -135,6 +136,33 @@ class RemoteAgent:
             self.running.pop(request_id, None)
             self.request_profiles.pop(request_id, None)
 
+    async def dispatch_request(
+        self, websocket: ClientConnection, message: dict[str, Any]
+    ) -> None:
+        request_id = message.get("request_id")
+        profile_id = message.get("profile")
+        if not isinstance(request_id, str) or request_id in self.running:
+            return
+        if len(self.running) >= MAX_CONCURRENT_REQUESTS_PER_AGENT:
+            await self.send(
+                websocket,
+                {
+                    "v": PROTOCOL_VERSION,
+                    "type": "result",
+                    "request_id": request_id,
+                    "ok": False,
+                    "error": (
+                        "Agent 当前忙碌；每台 Agent 最多同时执行 "
+                        f"{MAX_CONCURRENT_REQUESTS_PER_AGENT} 个请求"
+                    ),
+                },
+            )
+            return
+        if isinstance(profile_id, str):
+            self.request_profiles[request_id] = profile_id
+        task = asyncio.create_task(self.run_request(websocket, message))
+        self.running[request_id] = task
+
     async def session(self) -> None:
         async with websockets.connect(
             self.gateway_url,
@@ -185,14 +213,7 @@ class RemoteAgent:
                         {"v": PROTOCOL_VERSION, "type": "pong", "ts": message.get("ts")},
                     )
                 elif message_type == "request":
-                    request_id = message.get("request_id")
-                    profile_id = message.get("profile")
-                    if not isinstance(request_id, str) or request_id in self.running:
-                        continue
-                    if isinstance(profile_id, str):
-                        self.request_profiles[request_id] = profile_id
-                    task = asyncio.create_task(self.run_request(websocket, message))
-                    self.running[request_id] = task
+                    await self.dispatch_request(websocket, message)
                 elif message_type == "cancel":
                     request_id = message.get("request_id")
                     profile_id = self.request_profiles.get(request_id)

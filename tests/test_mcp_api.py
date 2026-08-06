@@ -10,6 +10,7 @@ from gateway.agent_protocol import CURRENT_AGENT_VERSION, CURRENT_CORE_VERSION
 from gateway.app import create_app
 from gateway.config import Settings
 from gateway.profiles import profile_mcp_tools, public_profile_catalog
+from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
 
 SHELL_DECLARATIONS = [
@@ -139,6 +140,12 @@ class McpApiTests(unittest.TestCase):
         profile = response.json()["result"]["structuredContent"]["profiles"][0]
         self.assertEqual(profile["id"], "shell.v1")
         self.assertEqual(profile["actions"][0]["mcp_tool"], "remote_exec")
+        self.assertEqual(
+            response.json()["result"]["structuredContent"]["gateway_limits"][
+                "max_concurrent_requests_per_agent"
+            ],
+            MAX_CONCURRENT_REQUESTS_PER_AGENT,
+        )
 
 
 if __name__ == "__main__":
