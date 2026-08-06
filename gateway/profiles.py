@@ -25,6 +25,7 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
         "actions": [
             {
                 "name": "exec",
+                "mcp_tool": "remote_exec",
                 "description": "执行一条 Shell 命令并等待其完成。",
                 "parameters": [
                     {
@@ -236,6 +237,15 @@ def public_profile_catalog() -> list[dict[str, Any]]:
             }
         )
     return catalog
+
+
+def profile_mcp_tools() -> set[str]:
+    return {
+        action["mcp_tool"]
+        for definition in PROFILE_REGISTRY.values()
+        for action in definition.get("actions", [])
+        if isinstance(action.get("mcp_tool"), str) and action["mcp_tool"]
+    }
 
 
 def validate_profile_result(

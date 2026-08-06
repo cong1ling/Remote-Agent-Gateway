@@ -83,6 +83,12 @@ function schemaField(field, required = false) {
   return `<article class="schema-field"><header><code>${escapeHtml(field.name)}</code><span>${escapeHtml(facts.join(" · "))}</span></header><p>${escapeHtml(field.description || "按协议返回该字段。")}</p></article>`;
 }
 
+function mcpToolSignature(action) {
+  if (!action.mcp_tool) return "";
+  const parameters = (action.parameters || []).map((field) => `${field.name}${field.required ? "" : "?"}`);
+  return `${action.mcp_tool}(${["agent_id", ...parameters].join(", ")})`;
+}
+
 function formatBytes(value) {
   if (Number.isInteger(value) && value % (1024 * 1024) === 0) return `${value / (1024 * 1024)} MiB`;
   return `${value} bytes`;
@@ -102,6 +108,7 @@ function openProfileDialog(profileId) {
   </article>`).join("");
   const actions = (profile.actions || []).map((action) => `<section class="protocol-section">
     <div class="protocol-section-head"><div><span>Action</span><h3>${escapeHtml(action.name)}</h3></div><p>${escapeHtml(action.description)}</p></div>
+    ${action.mcp_tool ? `<div class="mcp-invocation"><span>MCP 工具</span><code>${escapeHtml(action.mcp_tool)}</code><small>${escapeHtml(mcpToolSignature(action))}</small></div>` : ""}
     <h4>输入参数</h4><div class="schema-list">${(action.parameters || []).map((field) => schemaField(field, field.required)).join("")}</div>
     <h4>返回字段</h4><div class="schema-list">${(action.returns || []).map((field) => schemaField(field, true)).join("")}</div>
     <h4>错误语义</h4><div class="error-list">${(action.errors || []).map((error) => `<div><code>${escapeHtml(error.name)}</code><span>${escapeHtml(error.description)}</span></div>`).join("")}</div>
@@ -225,7 +232,7 @@ function renderBuilder() {
     <div class="profile-contract">${(profile.actions || []).map((action) => {
       const parameters = (action.parameters || []).map((parameter) => `${parameter.name}${parameter.required ? "" : "?"}: ${parameter.type}`).join(" · ");
       const returns = (action.returns || []).map((field) => `${field.name}: ${field.type}`).join(" · ");
-      return `<strong>${escapeHtml(action.name)}</strong><code>${escapeHtml(parameters)}</code><span>返回 ${escapeHtml(returns)}</span>`;
+      return `<strong>${escapeHtml(action.name)}</strong><code>${escapeHtml(parameters)}</code><span>返回 ${escapeHtml(returns)}</span>${action.mcp_tool ? `<span class="profile-mcp">MCP · <code>${escapeHtml(action.mcp_tool)}</code></span>` : ""}`;
     }).join("")}</div>
     <footer class="catalog-footer"><div class="catalog-meta"><span class="catalog-status">${profile.status === "stable" ? "稳定" : escapeHtml(profile.status)}</span>${profile.runtimes.map((runtime) => `<span>${escapeHtml(runtime)}</span>`).join("")}</div><button class="secondary" data-profile-details="${escapeHtml(profile.id)}" type="button">查看协议</button></footer>
   </article>`).join("") : emptyState("暂无可组装 Profile", "网关管理员尚未发布标准能力");

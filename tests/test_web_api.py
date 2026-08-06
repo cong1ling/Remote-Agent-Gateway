@@ -142,6 +142,7 @@ class WebApiTests(unittest.TestCase):
         )
         action = profile["actions"][0]
         self.assertEqual(action["name"], "exec")
+        self.assertEqual(action["mcp_tool"], "remote_exec")
         self.assertEqual(action["parameters"][1]["default"], 300)
         self.assertEqual(
             [field["name"] for field in action["returns"]],

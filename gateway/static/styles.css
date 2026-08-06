@@ -98,6 +98,8 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .profile-contract strong { font-size: 12px; }
 .profile-contract code { color: #334b61; font-size: 11px; white-space: normal; overflow-wrap: anywhere; }
 .profile-contract span { color: var(--muted); font-size: 11px; }
+.profile-contract .profile-mcp { color: #456a59; }
+.profile-contract .profile-mcp code { color: var(--accent); font-weight: 750; }
 .catalog-meta { display: flex; gap: 7px; flex-wrap: wrap; }
 .catalog-meta span { padding: 3px 7px; border-radius: 4px; color: #4d5f56; background: var(--soft); font-size: 11px; }
 .catalog-status { color: var(--accent) !important; background: #e2f4eb !important; }
@@ -165,6 +167,10 @@ dialog::backdrop { background: rgba(12, 20, 17, .5); }
 .protocol-section-head span { color: var(--blue); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
 .protocol-section-head h3 { margin: 3px 0 0; font-size: 15px; }
 .protocol-section-head p { max-width: 390px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.mcp-invocation { margin-bottom: 14px; padding: 10px 12px; border-left: 3px solid var(--accent); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; background: #eef7f3; }
+.mcp-invocation span { color: #547064; font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.mcp-invocation code { color: var(--accent); font-size: 12px; font-weight: 750; }
+.mcp-invocation small { margin-left: auto; color: #60756c; font-size: 10px; }
 .protocol-section h4 { margin: 16px 0 8px; color: #4b5953; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
 .schema-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .schema-field { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 5px; background: #fbfcfb; }
@@ -215,5 +221,6 @@ dialog::backdrop { background: rgba(12, 20, 17, .5); }
   .catalog-footer, .protocol-section-head { align-items: flex-start; flex-direction: column; }
   .schema-list, .dialect-grid { grid-template-columns: 1fr; }
   .error-list div { grid-template-columns: 1fr; gap: 5px; }
+  .mcp-invocation small { width: 100%; margin-left: 0; }
   .profile-dialog { padding: 20px; }
 }

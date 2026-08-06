@@ -102,7 +102,10 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
         return {"agents": [_agent_summary(agent, hub) for agent in agents]}
 
     @server.tool(
-        description="查询指定 Agent 的标准能力、可用操作及限制。调用远程操作前可用它确认能力。"
+        description=(
+            "查询指定 Agent 的标准能力、可用操作、限制及每个操作对应的固定 MCP 工具。"
+            "调用远程操作前可用它确认能力和调用入口。"
+        )
     )
     async def get_agent_capabilities(agent_id: str, ctx: Context) -> dict[str, Any]:
         del ctx

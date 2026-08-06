@@ -141,3 +141,11 @@
 - **替代方案**：始终写入用户主目录；让网关保存明文设备凭据供再次下载；实现带持久化确认的两阶段注册协议；继续在注册成功后直接尝试写文件。
 - **取舍**：写入预检无法覆盖预检后磁盘瞬时故障，但能在不增加协议状态和网关秘密存储的前提下拦截常见权限、只读文件系统和路径错误。高级部署需要显式规划持久化 config 路径。
 - **影响**：Agent Core 升级为 v2，Agent 发布版本升级为 0.1.1，WebSocket 协议仍为 v2。旧 Agent 可以继续连接但会显示需要升级；新工作台包自动包含该保护。
+
+## 2026-08-06：Profile Action 显式映射固定 MCP 工具
+
+- **决策**：网关维护的每个 Profile Action 都声明一个固定 `mcp_tool` 名称。该映射通过 Profile Catalog、Agent 能力详情和 MCP `get_agent_capabilities` 返回，并在网页协议窗口展示工具名与调用形式；测试保证所有映射名称真实存在于 MCP `tools/list`。
+- **原因**：Profile 描述远程能力契约，MCP 工具是本地 AI 的调用入口。只返回 `shell.v1/exec` 而不声明 `remote_exec` 会依赖模型从两份描述中自行推断，未来 Profile 和工具增多后容易选错入口。
+- **替代方案**：继续依赖工具描述推断；按 Agent 动态注册 MCP 工具；暴露万能 `remote_call(profile, action, params)`；让一个 Profile 只能对应一个工具。
+- **取舍**：Action 契约增加一个很小的映射字段，并需要保持注册表与 MCP 工具同步；换取确定的发现链路和强类型工具，同时避免动态工具膨胀及传统 MCP 聚合网关形态。
+- **影响**：当前 `shell.v1/exec` 映射到 `remote_exec`。未来一个 Profile 可以包含多个 Action，并分别映射到多个固定、语义明确的 MCP 工具。

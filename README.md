@@ -132,6 +132,8 @@ get_agent_capabilities(agent_id)
 remote_exec(agent_id, command, timeout)
 ```
 
+`get_agent_capabilities` 返回的每个 Profile Action 都会携带对应的固定 `mcp_tool` 名称。例如 `shell.v1/exec` 明确映射到 `remote_exec`，AI 无需根据描述猜测调用入口。Profile 只描述标准能力，MCP 工具仍由网关固定发布，不会按 Agent 动态注册。
+
 ## 自行部署
 
 Docker Compose：

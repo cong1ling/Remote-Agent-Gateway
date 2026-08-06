@@ -82,6 +82,7 @@
 - Agent 还必须上报 `agent_version`、`core_version`、`protocol_version` 和 `build_id`。工作台生成的每个 ZIP 使用 Bundle ID 作为唯一 `build_id`，源码运行使用明确的开发构建 ID。
 - 网关必须持久化版本信息并计算“当前版本”“需要升级”“协议不兼容”“高于网关版本”或“未知版本”状态；第一版不实现自动更新器。
 - Agent 首次注册前必须确认 config 所在目录可创建并原子写入，避免 Enrollment Token 被消费后无法保存设备凭据。已有 config 与新 Enrollment Token 同时出现时必须拒绝启动，防止覆盖现有 Agent 身份；服务和容器可以通过 `--config` 使用外部持久化路径。
+- 每个对 AI 开放的 Profile Action 必须声明对应的固定 `mcp_tool`，并通过 `get_agent_capabilities` 和网页协议详情暴露。映射到的工具必须真实存在于 MCP `tools/list`；不得按 Agent 动态注册工具，也不使用万能 `remote_call` 代替清晰、强类型的标准工具。
 - `remote_exec.command` 必须符合 Agent 声明的方言。网关至少校验 `shell.v1/exec` 返回的 `stdout: string`、`stderr: string` 和 `exit_code: integer`。
 - stdout 与 stderr 各最多捕获 2 MiB，超出部分附加截断标记；超时、取消、断线和心跳失活必须清理命令进程树及 Hub 中的连接和挂起请求。
 
