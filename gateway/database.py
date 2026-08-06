@@ -92,6 +92,20 @@ class Database:
                     revoked_at INTEGER
                 );
                 CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id);
+
+                CREATE TABLE IF NOT EXISTS agent_bundles (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    enrollment_token_id TEXT NOT NULL REFERENCES enrollment_tokens(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    runtime TEXT NOT NULL,
+                    profiles_json TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_bundles_user ON agent_bundles(user_id);
                 """
             )
 
@@ -382,3 +396,89 @@ class Database:
                 (int(time.time()), agent_id, user_id),
             )
         return cursor.rowcount > 0
+
+    def create_agent_bundle(
+        self,
+        bundle_id: str,
+        user_id: str,
+        enrollment_token_id: str,
+        name: str,
+        description: str,
+        runtime: str,
+        profiles: list[str],
+        filename: str,
+        expires_at: int,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO agent_bundles
+                    (id, user_id, enrollment_token_id, name, description, runtime,
+                     profiles_json, filename, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    bundle_id,
+                    user_id,
+                    enrollment_token_id,
+                    name,
+                    description,
+                    runtime,
+                    json.dumps(profiles, separators=(",", ":")),
+                    filename,
+                    now,
+                    expires_at,
+                ),
+            )
+        return {
+            "id": bundle_id,
+            "name": name,
+            "description": description,
+            "runtime": runtime,
+            "profiles": profiles,
+            "filename": filename,
+            "created_at": now,
+            "expires_at": expires_at,
+        }
+
+    @staticmethod
+    def _bundle_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        result = dict(row)
+        result["profiles"] = json.loads(result.pop("profiles_json"))
+        return result
+
+    def list_agent_bundles(self, user_id: str) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, name, description, runtime, profiles_json, filename,
+                       created_at, expires_at
+                FROM agent_bundles WHERE user_id = ? ORDER BY created_at DESC LIMIT 20
+                """,
+                (user_id,),
+            ).fetchall()
+        return [self._bundle_row(row) for row in rows if row is not None]
+
+    def get_owned_agent_bundle(self, user_id: str, bundle_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, name, description, runtime, profiles_json, filename,
+                       created_at, expires_at
+                FROM agent_bundles WHERE id = ? AND user_id = ?
+                """,
+                (bundle_id, user_id),
+            ).fetchone()
+        return self._bundle_row(row)
+
+    def cleanup_expired_agent_bundles(self) -> list[str]:
+        now = int(time.time())
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT filename FROM agent_bundles WHERE expires_at <= ?", (now,)
+            ).fetchall()
+            connection.execute("DELETE FROM agent_bundles WHERE expires_at <= ?", (now,))
+        return [row["filename"] for row in rows]

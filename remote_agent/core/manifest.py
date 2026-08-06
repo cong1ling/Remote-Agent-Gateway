@@ -12,6 +12,8 @@ class AgentManifest:
     runtime: str
     core_version: int
     profiles: tuple[str, ...]
+    name: str | None = None
+    description: str = ""
 
 
 def default_manifest_path() -> Path:
@@ -30,6 +32,7 @@ def load_manifest(path: Path | None = None) -> AgentManifest:
     runtime = raw.get("runtime")
     core_version = raw.get("core_version")
     profiles = raw.get("profiles")
+    agent = raw.get("agent", {})
     if runtime != "python":
         raise FatalAgentError(f"当前运行时不支持 Manifest runtime: {runtime}")
     if core_version != 1:
@@ -38,6 +41,19 @@ def load_manifest(path: Path | None = None) -> AgentManifest:
         isinstance(profile, str) and profile for profile in profiles
     ):
         raise FatalAgentError("Agent Manifest 必须声明至少一个 Profile")
+    if not isinstance(agent, dict):
+        raise FatalAgentError("Agent Manifest 的 agent 字段必须是对象")
+    name = agent.get("name")
+    description = agent.get("description", "")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise FatalAgentError("Agent Manifest 的 name 无效")
+    if not isinstance(description, str):
+        raise FatalAgentError("Agent Manifest 的 description 无效")
     deduplicated = tuple(dict.fromkeys(profiles))
-    return AgentManifest(runtime=runtime, core_version=core_version, profiles=deduplicated)
-
+    return AgentManifest(
+        runtime=runtime,
+        core_version=core_version,
+        profiles=deduplicated,
+        name=name.strip() if isinstance(name, str) else None,
+        description=description.strip(),
+    )

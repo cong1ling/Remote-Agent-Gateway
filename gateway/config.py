@@ -49,3 +49,6 @@ class Settings:
         scheme = "wss" if parsed.scheme == "https" else "ws"
         return f"{scheme}://{parsed.netloc}/ws/agent"
 
+    @property
+    def bundles_dir(self) -> Path:
+        return self.data_dir / "bundles"

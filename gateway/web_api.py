@@ -2,12 +2,14 @@ import time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .agent_builder import AgentBuildError, PythonAgentBuilder, new_bundle_id
 from .agent_hub import AgentHub
 from .config import Settings
 from .database import ConflictError, Database
-from .profiles import describe_profiles, profile_names
+from .profiles import describe_profiles, profile_names, public_profile_catalog, validate_profiles
 from .security import hash_password, hash_token, issue_token, verify_password
 
 
@@ -28,6 +30,13 @@ class AgentUpdate(BaseModel):
     description: str = Field(default="", max_length=500)
 
 
+class AgentBundleRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=500)
+    runtime: str = Field(default="python", max_length=32)
+    profiles: list[str] = Field(min_length=1, max_length=16)
+
+
 def _normalize_email(email: str) -> str:
     normalized = email.strip().lower()
     if normalized.count("@") != 1 or normalized.startswith("@") or normalized.endswith("@"):
@@ -44,6 +53,11 @@ def _agent_view(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
 
 def create_web_router(db: Database, settings: Settings, hub: AgentHub) -> APIRouter:
     router = APIRouter(prefix="/api")
+    python_builder = PythonAgentBuilder(settings.bundles_dir)
+
+    def cleanup_expired_bundles() -> None:
+        for filename in db.cleanup_expired_agent_bundles():
+            (settings.bundles_dir / filename).unlink(missing_ok=True)
 
     def current_user(
         session_token: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
@@ -165,6 +179,84 @@ def create_web_router(db: Database, settings: Settings, hub: AgentHub) -> APIRou
     @router.get("/agents")
     def list_agents(user: User) -> dict[str, Any]:
         return {"agents": [_agent_view(agent, hub) for agent in db.list_agents(user["id"])]}
+
+    @router.get("/profile-catalog")
+    def profile_catalog(user: User) -> dict[str, Any]:
+        del user
+        return {"profiles": public_profile_catalog(), "runtimes": ["python"]}
+
+    @router.get("/agent-bundles")
+    def list_agent_bundles(user: User) -> dict[str, Any]:
+        cleanup_expired_bundles()
+        bundles = db.list_agent_bundles(user["id"])
+        for bundle in bundles:
+            bundle["download_url"] = f"/api/agent-bundles/{bundle['id']}/download"
+        return {"bundles": bundles}
+
+    @router.post("/agent-bundles", status_code=201)
+    def create_agent_bundle(request: AgentBundleRequest, user: User) -> dict[str, Any]:
+        if request.runtime != "python":
+            raise HTTPException(status_code=422, detail="当前只支持组装 Python Agent")
+        name = request.name.strip()
+        description = request.description.strip()
+        try:
+            selected_profiles = validate_profiles(request.profiles)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        cleanup_expired_bundles()
+        bundle_id = new_bundle_id()
+        try:
+            path, filename = python_builder.build(
+                bundle_id=bundle_id,
+                name=name,
+                description=description,
+                profiles=selected_profiles,
+            )
+        except (ValueError, AgentBuildError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        enrollment = issue_token("enroll")
+        expires_at = int(time.time()) + settings.enrollment_minutes * 60
+        token_record: dict[str, Any] | None = None
+        try:
+            token_record = db.create_enrollment_token(
+                user["id"], f"Agent Bundle: {name}", enrollment.prefix, enrollment.digest, expires_at
+            )
+            bundle = db.create_agent_bundle(
+                bundle_id,
+                user["id"],
+                token_record["id"],
+                name,
+                description,
+                request.runtime,
+                selected_profiles,
+                filename,
+                expires_at,
+            )
+        except Exception:
+            path.unlink(missing_ok=True)
+            if token_record is not None:
+                db.revoke_enrollment_token(user["id"], token_record["id"])
+            raise
+        bundle["download_url"] = f"/api/agent-bundles/{bundle_id}/download"
+        command = (
+            f'python run.py --gateway "{settings.websocket_url}" '
+            f'--token "{enrollment.value}"'
+        )
+        return {"bundle": bundle, "secret": enrollment.value, "command": command}
+
+    @router.get("/agent-bundles/{bundle_id}/download")
+    def download_agent_bundle(bundle_id: str, user: User) -> FileResponse:
+        bundle = db.get_owned_agent_bundle(user["id"], bundle_id)
+        if bundle is None:
+            raise HTTPException(status_code=404, detail="Agent 组装包不存在")
+        if bundle["expires_at"] <= int(time.time()):
+            raise HTTPException(status_code=410, detail="Agent 组装包已过期，请重新生成")
+        path = (settings.bundles_dir / bundle["filename"]).resolve()
+        bundles_root = settings.bundles_dir.resolve()
+        if path.parent != bundles_root or not path.is_file():
+            raise HTTPException(status_code=404, detail="Agent 组装包文件不存在")
+        return FileResponse(path, media_type="application/zip", filename=bundle["filename"])
 
     @router.get("/agents/{agent_id}")
     def get_agent(agent_id: str, user: User) -> dict[str, Any]:

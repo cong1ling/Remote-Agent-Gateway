@@ -8,6 +8,13 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
         "id": "shell.v1",
         "name": "远程 Shell",
         "description": "在远程环境中执行 Shell 命令，并返回标准输出、错误输出和退出码。",
+        "status": "stable",
+        "implementations": {
+            "python": {
+                "source": "shell_v1.py",
+                "minimum_python": "3.11",
+            }
+        },
         "actions": [
             {
                 "name": "exec",
@@ -40,3 +47,18 @@ def describe_profiles(profile_ids: list[str]) -> list[dict[str, Any]]:
 def profile_names(profile_ids: list[str]) -> list[str]:
     return [PROFILE_REGISTRY[profile]["name"] for profile in profile_ids if profile in PROFILE_REGISTRY]
 
+
+def public_profile_catalog() -> list[dict[str, Any]]:
+    catalog: list[dict[str, Any]] = []
+    for definition in PROFILE_REGISTRY.values():
+        catalog.append(
+            {
+                "id": definition["id"],
+                "name": definition["name"],
+                "description": definition["description"],
+                "status": definition["status"],
+                "runtimes": sorted(definition["implementations"]),
+                "actions": definition["actions"],
+            }
+        )
+    return catalog

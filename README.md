@@ -22,6 +22,7 @@ Remote Agent
 - Agent 首次注册后自动保存独立设备凭据
 - Agent 心跳、离线检测、断线重连和稳定 ID
 - Agent 名称、用途描述、在线状态和 Profile 管理
+- Agent 工作台：从可信 Profile Catalog 组装并下载独立 Python Agent ZIP
 - MCP 工具：`list_agents`、`get_agent_capabilities`、`remote_exec`
 - Web 管理端
 - SQLite 持久化，数据库仅保存令牌哈希
@@ -41,22 +42,30 @@ $env:GATEWAY_PUBLIC_URL = "http://127.0.0.1:8000"
 
 打开 <http://127.0.0.1:8000>，注册账号后按以下顺序操作：
 
-1. 在“注册令牌”中创建一次性令牌。
-2. 在远程环境准备 `agent.py` 并安装 `websockets`。
-3. 运行页面生成的 Agent 启动命令。
+1. 在“Agent 工作台”中填写名称和用途，选择 Profile 并组装。
+2. 解压自动下载的 ZIP，在远程环境执行 `python -m pip install -r requirements.txt`。
+3. 运行页面单独展示的一次性 Agent 启动命令。
 4. 在“MCP Keys”中为 Claude 或 WorkBuddy 创建独立 Key。
 5. 使用页面展示的 MCP Endpoint 和 Key 配置客户端。
 
-远程 Agent 首次注册示例：
+组装包的远程 Agent 首次注册示例：
 
 ```powershell
-python agent.py --gateway "ws://127.0.0.1:8000/ws/agent" --token "enroll_xxx" --name "GPU Notebook" --description "用于模型训练"
+python run.py --gateway "ws://127.0.0.1:8000/ws/agent" --token "enroll_xxx"
 ```
 
-注册成功后，设备凭据默认保存在 `~/.remote-agent/config.json`。后续只需执行：
+组装包中的名称、描述和 Profile 来自 `remote_agent/manifest.json`，注册 Token 不会写入 ZIP。注册成功后，设备凭据保存在当前组装包的 `.agent/config.json`，后续只需执行：
 
 ```powershell
-python agent.py
+python run.py
+```
+
+源码仓库仍保留兼容入口 `python agent.py`。真正的远程实现位于：
+
+```text
+remote_agent/
+├── core/       # 连接、凭据、Manifest、协议路由
+└── profiles/   # 标准能力 Handler
 ```
 
 ## MCP 配置
@@ -115,4 +124,3 @@ python -m compileall -q gateway agent.py tests
 ```
 
 当前范围刻意不包含上传下载、Agent 分享、团队 RBAC、路径级 Shell 权限、硬件 Profile 和多进程扩展。
-

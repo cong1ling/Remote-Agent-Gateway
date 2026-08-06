@@ -93,3 +93,11 @@
 - **替代方案**：继续维护单文件 Agent；通过条件分支把所有能力写在 Runtime 中；立即开放 Python 第三方插件 API。
 - **取舍**：文件数量增加，但职责和构建边界清晰；当前 Handler 仍在同一进程中运行，暂不承担第三方插件隔离成本。
 - **影响**：Python Agent 默认由 `manifest.json` 选择 `shell.v1`；未来构建器可以复制固定 Core、选择 Profile 模块并生成新的 Manifest，而网关协议不需要改变。
+
+## 2026-08-06：Agent 工作台只组装可信 Profile，注册 Token 与下载包分离
+
+- **决策**：网关提供用户级 Agent 工作台。用户从管理员维护的 Profile Catalog 中选择能力，网关复制固定 Python Core 和对应 Handler、生成 Manifest 并输出 ZIP；一次性 Enrollment Token 只在创建响应和启动命令中展示，不写入 ZIP。
+- **原因**：用户需要可直接搬运的最小远程目录，但普通用户不能通过组装页面引入任意执行代码。Token 与包分离后，ZIP 可以安全地先行传输，只有持有一次性命令的人能够把设备绑定到账号。
+- **替代方案**：下载始终包含全部 Profile；允许用户上传 Python 插件；把 Enrollment Token 固化进配置文件；只提供源码目录而不提供网页构建。
+- **取舍**：当前 Profile Catalog 仍由代码维护，新增 Profile 需要管理员发布新版本；换取构建结果可审计、协议定义一致和更小的供应链攻击面。
+- **影响**：首个构建目标仅为 Python，下载包包含 `run.py`、固定 Core、选中 Profile、Manifest 和 `requirements.txt`。组装记录及下载均按用户隔离，并与 Enrollment Token 共享过期时间。

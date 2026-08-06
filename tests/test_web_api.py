@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -105,6 +107,50 @@ class WebApiTests(unittest.TestCase):
         self.client.post("/api/auth/logout")
         self.register("other@example.com")
         self.assertEqual(self.client.get("/api/agents").json()["agents"], [])
+
+    def test_user_can_build_and_download_python_agent(self) -> None:
+        self.register()
+        created = self.client.post(
+            "/api/agent-bundles",
+            json={
+                "name": "Built Agent",
+                "description": "从工作台组装",
+                "runtime": "python",
+                "profiles": ["shell.v1"],
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        payload = created.json()
+        self.assertTrue(payload["secret"].startswith("enroll_"))
+        self.assertIn("python run.py", payload["command"])
+
+        download = self.client.get(payload["bundle"]["download_url"])
+        self.assertEqual(download.status_code, 200, download.text)
+        self.assertEqual(download.headers["content-type"], "application/zip")
+        with zipfile.ZipFile(BytesIO(download.content)) as archive:
+            self.assertTrue(any(name.endswith("/remote_agent/profiles/shell_v1.py") for name in archive.namelist()))
+            combined = b"\n".join(archive.read(name) for name in archive.namelist())
+        self.assertNotIn(payload["secret"].encode(), combined)
+
+    def test_bundle_download_is_owner_scoped(self) -> None:
+        self.register()
+        created = self.client.post(
+            "/api/agent-bundles",
+            json={"name": "Private Bundle", "runtime": "python", "profiles": ["shell.v1"]},
+        ).json()
+        self.client.post("/api/auth/logout")
+        self.register("bundle-other@example.com")
+        response = self.client.get(created["bundle"]["download_url"])
+        self.assertEqual(response.status_code, 404)
+
+    def test_builder_rejects_unknown_profile(self) -> None:
+        self.register()
+        response = self.client.post(
+            "/api/agent-bundles",
+            json={"name": "Invalid Bundle", "runtime": "python", "profiles": ["unknown.v1"]},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("不支持的 Profile", response.json()["detail"])
 
 
 if __name__ == "__main__":
