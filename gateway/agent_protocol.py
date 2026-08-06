@@ -3,10 +3,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
-AGENT_PROTOCOL_VERSION = 2
-CURRENT_AGENT_VERSION = "0.1.0"
-CURRENT_CORE_VERSION = 1
+from remote_agent.core.version import (
+    AGENT_VERSION as CURRENT_AGENT_VERSION,
+    CORE_VERSION as CURRENT_CORE_VERSION,
+    PROTOCOL_VERSION as AGENT_PROTOCOL_VERSION,
+)
 
 _VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 _BUILD_ID_PATTERN = re.compile(r"^[0-9A-Za-z._:-]{1,80}$")

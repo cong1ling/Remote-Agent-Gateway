@@ -66,7 +66,10 @@ class PythonAgentBuilder:
             "===================================\n\n"
             "1. Install dependency: python -m pip install -r requirements.txt\n"
             "2. Run the one-time enrollment command shown by the gateway.\n"
-            "3. Later restarts only need: python run.py\n"
+            "3. Later restarts only need: python run.py\n\n"
+            "Device credentials default to .agent/config.json. The Agent checks that this\n"
+            "location is writable before consuming the enrollment token. For services,\n"
+            "read-only directories, or containers, use --config with a persistent path.\n"
         )
 
         try:

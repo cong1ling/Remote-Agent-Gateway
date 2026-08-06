@@ -61,8 +61,8 @@ class RemoteAgentProfileTests(unittest.TestCase):
         self.assertEqual(
             hello["version"],
             {
-                "agent_version": "0.1.0",
-                "core_version": 1,
+                "agent_version": "0.1.1",
+                "core_version": 2,
                 "protocol_version": 2,
                 "build_id": "profile-test",
             },

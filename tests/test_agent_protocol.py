@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from gateway.agent_protocol import agent_version_status, validate_agent_version
+from gateway.agent_protocol import (
+    CURRENT_AGENT_VERSION,
+    CURRENT_CORE_VERSION,
+    agent_version_status,
+    validate_agent_version,
+)
 
 
 class AgentVersionTests(unittest.TestCase):
@@ -33,8 +38,8 @@ class AgentVersionTests(unittest.TestCase):
         self.assertEqual(
             agent_version_status(
                 {
-                    "agent_version": "0.1.0",
-                    "core_version": 1,
+                    "agent_version": CURRENT_AGENT_VERSION,
+                    "core_version": CURRENT_CORE_VERSION,
                     "protocol_version": 2,
                     "build_id": "current",
                 }
@@ -44,7 +49,7 @@ class AgentVersionTests(unittest.TestCase):
         self.assertEqual(
             agent_version_status(
                 {
-                    "agent_version": "0.0.9",
+                    "agent_version": "0.1.0",
                     "core_version": 1,
                     "protocol_version": 2,
                     "build_id": "old",
@@ -55,8 +60,8 @@ class AgentVersionTests(unittest.TestCase):
         self.assertEqual(
             agent_version_status(
                 {
-                    "agent_version": "0.1.0",
-                    "core_version": 1,
+                    "agent_version": CURRENT_AGENT_VERSION,
+                    "core_version": CURRENT_CORE_VERSION,
                     "protocol_version": 1,
                     "build_id": "incompatible",
                 }

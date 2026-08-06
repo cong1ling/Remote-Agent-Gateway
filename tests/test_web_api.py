@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from gateway.agent_protocol import CURRENT_AGENT_VERSION, CURRENT_CORE_VERSION
 from gateway.app import create_app
 from gateway.config import Settings
 
@@ -23,8 +24,8 @@ SHELL_DECLARATIONS = [
     }
 ]
 AGENT_VERSION = {
-    "agent_version": "0.1.0",
-    "core_version": 1,
+    "agent_version": CURRENT_AGENT_VERSION,
+    "core_version": CURRENT_CORE_VERSION,
     "protocol_version": 2,
     "build_id": "web-test-build",
 }

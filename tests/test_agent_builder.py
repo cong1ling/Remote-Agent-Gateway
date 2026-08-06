@@ -33,8 +33,8 @@ class AgentBuilderTests(unittest.TestCase):
                     archive.read(f"{root}/remote_agent/manifest.json").decode("utf-8")
                 )
         self.assertEqual(manifest["profiles"], ["shell.v1"])
-        self.assertEqual(manifest["agent_version"], "0.1.0")
-        self.assertEqual(manifest["core_version"], 1)
+        self.assertEqual(manifest["agent_version"], "0.1.1")
+        self.assertEqual(manifest["core_version"], 2)
         self.assertEqual(manifest["build_id"], "12345678-1234-1234-1234-123456789012")
         self.assertEqual(manifest["agent"]["name"], "GPU Notebook")
         self.assertEqual(manifest["agent"]["description"], "模型训练环境")
@@ -53,6 +53,21 @@ class AgentBuilderTests(unittest.TestCase):
                     archive.read(name).decode("utf-8", "ignore") for name in archive.namelist()
                 )
         self.assertNotIn("enroll_", text)
+
+    def test_bundle_documents_persistent_config_override(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            builder = PythonAgentBuilder(Path(directory))
+            path, filename = builder.build(
+                bundle_id="12345678-1234-1234-1234-123456789012",
+                name="Persistent Agent",
+                description="",
+                profiles=["shell.v1"],
+            )
+            with zipfile.ZipFile(path) as archive:
+                root = filename.removesuffix(".zip")
+                readme = archive.read(f"{root}/README.txt").decode("utf-8")
+        self.assertIn(".agent/config.json", readme)
+        self.assertIn("--config", readme)
 
     def test_downloaded_bundle_launcher_is_runnable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

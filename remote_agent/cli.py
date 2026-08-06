@@ -28,7 +28,8 @@ async def async_main(default_config: Path | None = None) -> None:
     args = parse_args(default_config)
     manifest = load_manifest(args.manifest)
     config_store = AgentConfig(args.config)
-    saved = config_store.load()
+    enrollment_token = args.token.strip() if args.token else None
+    saved = config_store.prepare_startup(enrollment_token)
     gateway_url = args.gateway or (saved or {}).get("gateway_url")
     if not gateway_url:
         raise FatalAgentError("需要通过 --gateway 指定网关 WebSocket 地址")
@@ -39,7 +40,7 @@ async def async_main(default_config: Path | None = None) -> None:
     agent = RemoteAgent(
         gateway_url=gateway_url,
         config_store=config_store,
-        enrollment_token=args.token,
+        enrollment_token=enrollment_token,
         name=(args.name.strip() if args.name else manifest.name) or socket.gethostname(),
         description=args.description.strip() if args.description is not None else manifest.description,
         build_id=manifest.build_id,

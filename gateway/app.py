@@ -8,6 +8,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from . import __version__
 from .agent_api import handle_agent_websocket
 from .agent_hub import AgentHub
 from .config import Settings
@@ -45,7 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Remote Agent Gateway",
-        version="0.1.0",
+        version=__version__,
         docs_url="/api/docs",
         redoc_url=None,
         lifespan=lifespan,

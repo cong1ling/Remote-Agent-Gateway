@@ -91,6 +91,14 @@ python run.py --gateway "ws://127.0.0.1:8000/ws/agent" --token "enroll_xxx"
 python run.py
 ```
 
+Agent 在发送首次注册 Token 前会确认设备凭据位置可以创建并原子写入；检查失败时 Token 不会被消费。只读目录、系统服务或容器应通过 `--config` 指向可写且持久化的位置：
+
+```powershell
+python run.py --gateway "wss://gateway.example.com/ws/agent" --token "enroll_xxx" --config "D:\RemoteAgentData\local-windows\config.json"
+```
+
+同一个 config 代表同一个 Agent 实例。已有 config 时再次传入 Enrollment Token 会被拒绝；启动现有 Agent 应移除 `--token`，注册另一台 Agent 应使用新的 `--config` 路径。容器中的 config 路径必须挂载持久卷。
+
 源码仓库仍保留兼容入口 `python agent.py`。真正的远程实现位于：
 
 ```text

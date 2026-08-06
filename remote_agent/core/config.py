@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -13,21 +14,84 @@ class AgentConfig:
         self.path = path.expanduser().resolve()
 
     def load(self) -> dict[str, Any] | None:
-        if not self.path.is_file():
+        if not self.path.exists():
             return None
-        with self.path.open("r", encoding="utf-8") as handle:
-            value = json.load(handle)
+        if not self.path.is_file():
+            raise FatalAgentError(f"设备凭据路径不是文件: {self.path}")
+        try:
+            with self.path.open("r", encoding="utf-8") as handle:
+                value = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise FatalAgentError(f"无法读取设备凭据: {self.path}") from exc
         if not isinstance(value, dict):
-            raise FatalAgentError(f"设备配置格式无效: {self.path}")
+            raise FatalAgentError(f"设备凭据格式无效: {self.path}")
+        for field in ("gateway_url", "agent_id", "credential"):
+            if not isinstance(value.get(field), str) or not value[field].strip():
+                raise FatalAgentError(f"设备凭据缺少有效的 {field}: {self.path}")
         return value
 
-    def save(self, value: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(value, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-        os.replace(temporary, self.path)
-        if os.name != "nt":
-            os.chmod(self.path, 0o600)
+    def prepare_startup(self, enrollment_token: str | None) -> dict[str, Any] | None:
+        saved = self.load()
+        if saved is not None:
+            if enrollment_token:
+                raise FatalAgentError(
+                    f"该配置路径已经绑定 Agent，不能再次使用 Enrollment Token: {self.path}。"
+                    "启动现有 Agent 请移除 --token；注册新 Agent 请指定新的 --config 路径。"
+                )
+            return saved
+        if not enrollment_token:
+            raise FatalAgentError(
+                "首次运行需要提供 --token，或通过 --config 指向已有设备凭据"
+            )
+        self._ensure_writable()
+        return None
 
+    def _temporary_path(self, purpose: str) -> Path:
+        return self.path.with_name(
+            f".{self.path.name}.{secrets.token_hex(8)}.{purpose}"
+        )
+
+    def _ensure_writable(self) -> None:
+        temporary = self._temporary_path("write-test")
+        replacement = self._temporary_path("replace-test")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with temporary.open("x", encoding="utf-8") as handle:
+                handle.write("{}\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, replacement)
+        except OSError as exc:
+            raise FatalAgentError(
+                f"设备凭据位置不可写: {self.path}。"
+                "请通过 --config 指向可写且可持久化的位置。"
+            ) from exc
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+                replacement.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def save(self, value: dict[str, Any]) -> None:
+        temporary = self._temporary_path("tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with temporary.open("x", encoding="utf-8") as handle:
+                json.dump(value, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            if os.name != "nt":
+                os.chmod(temporary, 0o600)
+            os.replace(temporary, self.path)
+        except OSError as exc:
+            raise FatalAgentError(
+                f"无法保存设备凭据: {self.path}。"
+                "Enrollment Token 可能已经被消费，请修复存储位置后重新签发 Token。"
+            ) from exc
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
