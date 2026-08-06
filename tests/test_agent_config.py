@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import base64
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from remote_agent.core import AgentConfig, FatalAgentError
+from remote_agent.core import AgentConfig, EnvironmentAgentConfig, FatalAgentError
 
 
 VALID_CONFIG = {
@@ -62,6 +63,32 @@ class AgentConfigTests(unittest.TestCase):
             path.write_text("{}", encoding="utf-8")
             with self.assertRaisesRegex(FatalAgentError, "gateway_url"):
                 store.load()
+
+    def test_environment_config_decodes_and_consumes_secret(self) -> None:
+        encoded = base64.b64encode(
+            json.dumps(VALID_CONFIG).encode("utf-8")
+        ).decode("ascii")
+        environment = {"REMOTE_AGENT_CONFIG_B64": encoded}
+
+        store = EnvironmentAgentConfig(
+            "REMOTE_AGENT_CONFIG_B64", environment=environment
+        )
+
+        self.assertEqual(store.prepare_startup(None), VALID_CONFIG)
+        self.assertNotIn("REMOTE_AGENT_CONFIG_B64", environment)
+        with self.assertRaisesRegex(FatalAgentError, "Enrollment Token"):
+            store.prepare_startup("enroll_test")
+        with self.assertRaisesRegex(FatalAgentError, "只读"):
+            store.save(VALID_CONFIG)
+
+    def test_environment_config_rejects_invalid_or_missing_secret(self) -> None:
+        with self.assertRaisesRegex(FatalAgentError, "未设置"):
+            EnvironmentAgentConfig("MISSING", environment={})
+
+        environment = {"BROKEN": "not-base64"}
+        with self.assertRaisesRegex(FatalAgentError, "Base64 JSON"):
+            EnvironmentAgentConfig("BROKEN", environment=environment)
+        self.assertNotIn("BROKEN", environment)
 
 
 if __name__ == "__main__":

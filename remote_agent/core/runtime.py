@@ -13,7 +13,7 @@ from websockets.asyncio.client import ClientConnection
 
 from remote_agent.profiles.base import ProfileHandler
 
-from .config import AgentConfig
+from .config import AgentConfigStore
 from .errors import FatalAgentError
 from .limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 from .version import AGENT_VERSION, CORE_VERSION, PROTOCOL_VERSION
@@ -27,7 +27,7 @@ class RemoteAgent:
     def __init__(
         self,
         gateway_url: str,
-        config_store: AgentConfig,
+        config_store: AgentConfigStore,
         enrollment_token: str | None,
         name: str,
         description: str,

@@ -17,6 +17,48 @@ class AgentBuildError(Exception):
     pass
 
 
+GITHUB_ACTIONS_TEMPLATE = """name: Remote Agent Session
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remote-agent-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  remote-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      REMOTE_AGENT_DIR: __AGENT_DIR__
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Agent dependency
+        run: python -m pip install -r "$REMOTE_AGENT_DIR/requirements.txt"
+
+      - name: Keep remote Agent online
+        env:
+          REMOTE_AGENT_CONFIG_B64: ${{ secrets.REMOTE_AGENT_CONFIG_B64 }}
+        run: >-
+          python "$REMOTE_AGENT_DIR/run.py"
+          --config-env REMOTE_AGENT_CONFIG_B64
+          --workdir "$GITHUB_WORKSPACE"
+"""
+
+
 class PythonAgentBuilder:
     runtime = "python"
 
@@ -70,13 +112,36 @@ class PythonAgentBuilder:
             "Device credentials default to .agent/config.json. The Agent checks that this\n"
             "location is writable before consuming the enrollment token. For services,\n"
             "read-only directories, or containers, use --config with a persistent path.\n"
+            "\n"
+            "GitHub Actions / CI\n"
+            "-------------------\n"
+            "1. Register this dedicated Agent once with the normal enrollment command.\n"
+            "2. Stop it, then encode .agent/config.json as a single-line Base64 value:\n"
+            "   python -c \"import base64,pathlib; print(base64.b64encode(pathlib.Path('.agent/config.json').read_bytes()).decode())\"\n"
+            "3. Save the output as the repository secret REMOTE_AGENT_CONFIG_B64.\n"
+            "4. Keep this Agent directory at the repository root and copy\n"
+            "   github-actions.yml.example to .github/workflows/remote-agent.yml.\n"
+            "5. Start 'Remote Agent Session' manually from the Actions page.\n"
+            "\n"
+            "The CI secret is consumed and removed from the Agent process environment\n"
+            "before shell commands can run. Never commit .agent/config.json, and do not\n"
+            "run the same device credential in two places at the same time.\n"
         )
+        github_actions = GITHUB_ACTIONS_TEMPLATE.replace("__AGENT_DIR__", archive_root)
 
         try:
             with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(f"{archive_root}/run.py", launcher)
                 archive.writestr(f"{archive_root}/requirements.txt", "websockets>=14,<18\n")
                 archive.writestr(f"{archive_root}/README.txt", readme)
+                archive.writestr(
+                    f"{archive_root}/.gitignore",
+                    ".agent/\n__pycache__/\n*.py[cod]\n",
+                )
+                archive.writestr(
+                    f"{archive_root}/github-actions.yml.example",
+                    github_actions,
+                )
                 archive.writestr(
                     f"{archive_root}/remote_agent/manifest.json",
                     json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",

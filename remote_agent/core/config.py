@@ -1,12 +1,32 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import secrets
+from collections.abc import MutableMapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .errors import FatalAgentError
+
+
+def _validate_device_config(value: object, source: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise FatalAgentError(f"设备凭据格式无效: {source}")
+    for field in ("gateway_url", "agent_id", "credential"):
+        if not isinstance(value.get(field), str) or not value[field].strip():
+            raise FatalAgentError(f"设备凭据缺少有效的 {field}: {source}")
+    return value
+
+
+class AgentConfigStore(Protocol):
+    def load(self) -> dict[str, Any] | None: ...
+
+    def prepare_startup(self, enrollment_token: str | None) -> dict[str, Any] | None: ...
+
+    def save(self, value: dict[str, Any]) -> None: ...
 
 
 class AgentConfig:
@@ -23,12 +43,7 @@ class AgentConfig:
                 value = json.load(handle)
         except (OSError, json.JSONDecodeError) as exc:
             raise FatalAgentError(f"无法读取设备凭据: {self.path}") from exc
-        if not isinstance(value, dict):
-            raise FatalAgentError(f"设备凭据格式无效: {self.path}")
-        for field in ("gateway_url", "agent_id", "credential"):
-            if not isinstance(value.get(field), str) or not value[field].strip():
-                raise FatalAgentError(f"设备凭据缺少有效的 {field}: {self.path}")
-        return value
+        return _validate_device_config(value, str(self.path))
 
     def prepare_startup(self, enrollment_token: str | None) -> dict[str, Any] | None:
         saved = self.load()
@@ -95,3 +110,48 @@ class AgentConfig:
                 temporary.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+class EnvironmentAgentConfig:
+    """Read-only device credentials supplied by a process environment variable."""
+
+    def __init__(
+        self,
+        variable_name: str,
+        environment: MutableMapping[str, str] | None = None,
+    ):
+        normalized = variable_name.strip()
+        if not normalized:
+            raise FatalAgentError("设备凭据环境变量名称不能为空")
+        self.variable_name = normalized
+        source = environment if environment is not None else os.environ
+
+        # Consume the secret before Profile handlers can spawn child processes.
+        # In particular, shell.v1 must not be able to read its own credential.
+        encoded = source.pop(normalized, None)
+        if not isinstance(encoded, str) or not encoded.strip():
+            raise FatalAgentError(f"设备凭据环境变量未设置: {normalized}")
+        compact = "".join(encoded.split())
+        try:
+            raw = base64.b64decode(compact, validate=True).decode("utf-8")
+            value = json.loads(raw)
+        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise FatalAgentError(
+                f"设备凭据环境变量不是有效的 Base64 JSON: {normalized}"
+            ) from exc
+        self._value = _validate_device_config(value, f"环境变量 {normalized}")
+
+    def load(self) -> dict[str, Any]:
+        return dict(self._value)
+
+    def prepare_startup(self, enrollment_token: str | None) -> dict[str, Any]:
+        if enrollment_token:
+            raise FatalAgentError(
+                "环境变量凭据模式不能使用 Enrollment Token；"
+                "请先完成一次注册，再把已生成的设备凭据保存到 CI Secret"
+            )
+        return self.load()
+
+    def save(self, value: dict[str, Any]) -> None:
+        del value
+        raise FatalAgentError("环境变量设备凭据为只读配置，不能写回")

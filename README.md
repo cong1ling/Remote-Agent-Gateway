@@ -101,6 +101,24 @@ python run.py --gateway "wss://gateway.example.com/ws/agent" --token "enroll_xxx
 
 同一个 config 代表同一个 Agent 实例。已有 config 时再次传入 Enrollment Token 会被拒绝；启动现有 Agent 应移除 `--token`，注册另一台 Agent 应使用新的 `--config` 路径。容器中的 config 路径必须挂载持久卷。
 
+### CI/CD 与环境变量凭据
+
+GitHub Actions、临时容器等无持久磁盘环境可以从 CI Secret 注入已经注册好的设备凭据。先为 CI 创建一台专用 Agent，正常注册一次并停止进程，再把 `.agent/config.json` 编码为单行 Base64：
+
+```powershell
+python -c "import base64,pathlib; print(base64.b64encode(pathlib.Path('.agent/config.json').read_bytes()).decode())"
+```
+
+将输出保存为 CI Secret `REMOTE_AGENT_CONFIG_B64`，启动时指定环境变量名称：
+
+```powershell
+python run.py --config-env REMOTE_AGENT_CONFIG_B64 --workdir .
+```
+
+Agent 读取后会立即从自身进程环境中移除该变量，避免 `shell.v1` 启动的子进程读取设备凭据。环境变量模式是只读的，不能与 Enrollment Token 同时使用。工作台生成的 ZIP 包含 `github-actions.yml.example` 和保护 `.agent/` 的 `.gitignore`；GitHub Actions 模板仅允许手动启动、使用只读仓库权限、禁止持久化 Checkout 凭据、限制单实例并设置运行超时。
+
+CI Runner 在线期间拥有该任务本身的系统权限。不要在同一个 Agent Step 中注入生产部署秘钥，也不要通过 `push` 或 `pull_request` 自动触发远程 Shell 会话。
+
 源码仓库仍保留兼容入口 `python agent.py`。真正的远程实现位于：
 
 ```text

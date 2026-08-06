@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import json
+import os
 import shlex
 import shutil
 import sys
@@ -8,6 +11,7 @@ import time
 import unittest
 from pathlib import Path
 
+from remote_agent.core import EnvironmentAgentConfig
 from remote_agent.profiles.shell_v1 import (
     MAX_CAPTURE_BYTES,
     TRUNCATION_MARKER,
@@ -29,6 +33,37 @@ def python_command(runtime: ShellRuntime, code: str) -> str:
 
 
 class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_environment_device_secret_is_not_inherited_by_shell(self) -> None:
+        variable_name = "REMOTE_AGENT_CONFIG_B64_TEST"
+        config = {
+            "gateway_url": "wss://gateway.example/ws/agent",
+            "agent_id": "agent-ci-test",
+            "credential": "agent_test_secret",
+        }
+        os.environ[variable_name] = base64.b64encode(
+            json.dumps(config).encode("utf-8")
+        ).decode("ascii")
+        try:
+            store = EnvironmentAgentConfig(variable_name)
+            self.assertEqual(store.load(), config)
+            with tempfile.TemporaryDirectory() as directory:
+                executor = ShellExecutor(Path(directory))
+                command = python_command(
+                    executor.runtime,
+                    (
+                        "import os;print(os.environ.get("
+                        f"'{variable_name}','not-inherited'))"
+                    ),
+                )
+                result = await executor.execute(
+                    "request-env-secret", {"command": command, "timeout": 10}
+                )
+        finally:
+            os.environ.pop(variable_name, None)
+
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(result["stdout"].strip(), "not-inherited")
+
     async def test_exec_returns_stdout_stderr_and_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             executor = ShellExecutor(Path(directory))

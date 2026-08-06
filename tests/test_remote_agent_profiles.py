@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from remote_agent.core import (
     AGENT_VERSION,
     CORE_VERSION,
     AgentConfig,
+    EnvironmentAgentConfig,
     FatalAgentError,
     RemoteAgent,
     load_manifest,
@@ -63,8 +65,8 @@ class RemoteAgentProfileTests(unittest.TestCase):
         self.assertEqual(
             hello["version"],
             {
-                "agent_version": "0.1.3",
-                "core_version": 3,
+                "agent_version": "0.1.4",
+                "core_version": 4,
                 "protocol_version": 2,
                 "build_id": "profile-test",
             },
@@ -76,6 +78,37 @@ class RemoteAgentProfileTests(unittest.TestCase):
         )
         self.assertEqual(MAX_CAPTURE_BYTES, SHELL_MAX_CAPTURE_BYTES)
         self.assertEqual(TRUNCATION_MARKER.decode("ascii"), SHELL_TRUNCATION_MARKER)
+
+    def test_environment_config_reconnects_with_existing_identity(self) -> None:
+        config = {
+            "gateway_url": "wss://gateway.example/ws/agent",
+            "agent_id": "agent-ci-test",
+            "credential": "agent_ci_secret",
+        }
+        environment = {
+            "REMOTE_AGENT_CONFIG_B64": base64.b64encode(
+                json.dumps(config).encode("utf-8")
+            ).decode("ascii")
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = RemoteAgent(
+                gateway_url=config["gateway_url"],
+                config_store=EnvironmentAgentConfig(
+                    "REMOTE_AGENT_CONFIG_B64", environment=environment
+                ),
+                enrollment_token=None,
+                name="CI Agent",
+                description="",
+                build_id="ci-test",
+                handlers=build_profile_handlers(["shell.v1"], root),
+            )
+            hello = agent.hello_message()
+
+        self.assertEqual(hello["agent_id"], config["agent_id"])
+        self.assertEqual(hello["credential"], config["credential"])
+        self.assertNotIn("enrollment_token", hello)
+        self.assertNotIn("REMOTE_AGENT_CONFIG_B64", environment)
 
     def test_unknown_profile_cannot_be_declared_without_handler(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

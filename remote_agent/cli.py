@@ -7,7 +7,13 @@ import socket
 import sys
 from pathlib import Path
 
-from remote_agent.core import AgentConfig, FatalAgentError, RemoteAgent, load_manifest
+from remote_agent.core import (
+    AgentConfig,
+    EnvironmentAgentConfig,
+    FatalAgentError,
+    RemoteAgent,
+    load_manifest,
+)
 from remote_agent.profiles import build_profile_handlers
 
 
@@ -19,7 +25,17 @@ def parse_args(default_config: Path | None = None) -> argparse.Namespace:
     parser.add_argument("--name", help="Agent 显示名称，默认读取 Manifest 或主机名")
     parser.add_argument("--description", help="Agent 用途描述，默认读取 Manifest")
     parser.add_argument("--workdir", default=os.getcwd(), help="远程命令工作目录")
-    parser.add_argument("--config", type=Path, default=config_path, help="设备凭据保存位置")
+    config_group = parser.add_mutually_exclusive_group()
+    config_group.add_argument(
+        "--config", type=Path, default=config_path, help="设备凭据保存位置"
+    )
+    config_group.add_argument(
+        "--config-env",
+        metavar="NAME",
+        help=(
+            "从指定环境变量读取 Base64 JSON 设备凭据；适用于 CI、容器和只读环境"
+        ),
+    )
     parser.add_argument("--manifest", type=Path, help="Agent 组装 Manifest，默认读取包内 manifest.json")
     return parser.parse_args()
 
@@ -27,7 +43,11 @@ def parse_args(default_config: Path | None = None) -> argparse.Namespace:
 async def async_main(default_config: Path | None = None) -> None:
     args = parse_args(default_config)
     manifest = load_manifest(args.manifest)
-    config_store = AgentConfig(args.config)
+    config_store = (
+        EnvironmentAgentConfig(args.config_env)
+        if args.config_env
+        else AgentConfig(args.config)
+    )
     enrollment_token = args.token.strip() if args.token else None
     saved = config_store.prepare_startup(enrollment_token)
     gateway_url = args.gateway or (saved or {}).get("gateway_url")

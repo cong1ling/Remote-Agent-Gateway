@@ -29,12 +29,14 @@ class AgentBuilderTests(unittest.TestCase):
                 self.assertIn(f"{root}/remote_agent/core/runtime.py", names)
                 self.assertIn(f"{root}/remote_agent/core/version.py", names)
                 self.assertIn(f"{root}/remote_agent/profiles/shell_v1.py", names)
+                self.assertIn(f"{root}/.gitignore", names)
+                self.assertIn(f"{root}/github-actions.yml.example", names)
                 manifest = json.loads(
                     archive.read(f"{root}/remote_agent/manifest.json").decode("utf-8")
                 )
         self.assertEqual(manifest["profiles"], ["shell.v1"])
-        self.assertEqual(manifest["agent_version"], "0.1.3")
-        self.assertEqual(manifest["core_version"], 3)
+        self.assertEqual(manifest["agent_version"], "0.1.4")
+        self.assertEqual(manifest["core_version"], 4)
         self.assertEqual(manifest["build_id"], "12345678-1234-1234-1234-123456789012")
         self.assertEqual(manifest["agent"]["name"], "GPU Notebook")
         self.assertEqual(manifest["agent"]["description"], "模型训练环境")
@@ -68,6 +70,34 @@ class AgentBuilderTests(unittest.TestCase):
                 readme = archive.read(f"{root}/README.txt").decode("utf-8")
         self.assertIn(".agent/config.json", readme)
         self.assertIn("--config", readme)
+        self.assertIn("REMOTE_AGENT_CONFIG_B64", readme)
+        self.assertIn("github-actions.yml.example", readme)
+
+    def test_bundle_includes_guarded_github_actions_template(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            builder = PythonAgentBuilder(Path(directory))
+            path, filename = builder.build(
+                bundle_id="12345678-1234-1234-1234-123456789012",
+                name="CI Runner",
+                description="",
+                profiles=["shell.v1"],
+            )
+            with zipfile.ZipFile(path) as archive:
+                root = filename.removesuffix(".zip")
+                workflow = archive.read(
+                    f"{root}/github-actions.yml.example"
+                ).decode("utf-8")
+                gitignore = archive.read(f"{root}/.gitignore").decode("utf-8")
+
+        self.assertIn("workflow_dispatch", workflow)
+        self.assertIn("contents: read", workflow)
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn("timeout-minutes: 60", workflow)
+        self.assertIn("cancel-in-progress: true", workflow)
+        self.assertIn("secrets.REMOTE_AGENT_CONFIG_B64", workflow)
+        self.assertIn("--config-env REMOTE_AGENT_CONFIG_B64", workflow)
+        self.assertIn(root, workflow)
+        self.assertIn(".agent/", gitignore)
 
     def test_downloaded_bundle_launcher_is_runnable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -92,6 +122,7 @@ class AgentBuilderTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--manifest", result.stdout)
+        self.assertIn("--config-env", result.stdout)
 
 
 if __name__ == "__main__":

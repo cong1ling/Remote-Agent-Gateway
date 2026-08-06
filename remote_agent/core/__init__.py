@@ -1,4 +1,4 @@
-from .config import AgentConfig
+from .config import AgentConfig, AgentConfigStore, EnvironmentAgentConfig
 from .errors import FatalAgentError
 from .manifest import AgentManifest, load_manifest
 from .runtime import RemoteAgent
@@ -9,7 +9,9 @@ __all__ = [
     "CORE_VERSION",
     "PROTOCOL_VERSION",
     "AgentConfig",
+    "AgentConfigStore",
     "AgentManifest",
+    "EnvironmentAgentConfig",
     "FatalAgentError",
     "RemoteAgent",
     "load_manifest",

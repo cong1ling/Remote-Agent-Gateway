@@ -165,3 +165,11 @@
 - **替代方案**：要求 MCP 客户端为每条命令手动追加 `Out-String`；删除显式退出并放弃准确传递原生命令退出码；把 PowerShell 对象强制序列化为 JSON；在网关端猜测并修补空输出。
 - **取舍**：保持普通 PowerShell 终端的默认文本表现以及现有 `stdout`、`stderr`、`exit_code` 契约，也保留原生命令退出码；对象仍按 PowerShell 默认视图展示，而不是变成新的结构化返回协议。
 - **影响**：Windows PowerShell 与 PowerShell 7 的对象输出不再因包装脚本提前退出而消失。`Set-Content` 等本来没有输出的命令仍会返回空 stdout，调用方在需要确认副作用时仍应显式检查目标状态。
+
+## 2026-08-06：CI 与只读环境通过一次性消费的环境变量加载设备凭据
+
+- **决策**：Agent Core 增加只读环境变量凭据源，`--config-env NAME` 从指定变量读取 Base64 JSON 设备凭据。变量在解析时立即从 Agent 进程环境中删除，避免后续 Profile 子进程继承；该模式禁止 Enrollment Token 和凭据写回。工作台 ZIP 同时提供 GitHub Actions 手动会话模板与保护 `.agent/` 的 `.gitignore`。Agent 发布版本升级为 0.1.4、Core 升级为 v4，WebSocket 协议仍为 v2。
+- **原因**：GitHub Actions 等托管 Runner 每次启动都是临时文件系统，无法依赖注册后生成的本地 config；把已有设备身份保存为 CI Secret 可以让同一 Agent ID 跨任务重连。若仅把 Secret 留在进程环境中，`shell.v1` 执行 `env` 或 `Get-ChildItem Env:` 时会暴露 Agent 自身凭据，因此必须在 Handler 创建子进程前消费并删除。
+- **替代方案**：每次流水线使用新的 Enrollment Token；把 config 放进 Git 仓库、Artifact 或 Cache；增加可长期复用的第三种 CI Token；让网关预创建并导出设备凭据；为 GitHub 单独实现 OAuth App 与 Runner 管理系统。
+- **取舍**：不新增网关协议、秘钥类型和 CI 管理页面，文件配置与环境变量配置共享同一设备身份校验；代价是用户仍需先完成一次正常注册并手动把 config 写入 CI Secret。模板只面向手动、限时调试会话，不承诺常驻 Runner 或流水线编排。
+- **影响**：同一 Python Agent 可以运行在 GitHub Actions、Docker、Kubernetes Secret 和其他只读环境；Runner 会按实际系统重新声明 `shell.v1` 方言。设备凭据变量不会进入远程 Shell，但 Agent 仍拥有 CI Job 自身可访问的文件和其他环境信息，使用者必须避免向该 Step 注入无关生产秘钥。
