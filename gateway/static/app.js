@@ -1,4 +1,4 @@
-const state = { user: null, agents: [], keys: [], tokens: [], mcpUrl: "", wsUrl: "", authMode: "login", view: "overview" };
+const state = { user: null, agents: [], keys: [], tokens: [], catalog: [], bundles: [], mcpUrl: "", wsUrl: "", authMode: "login", view: "overview" };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -58,10 +58,12 @@ async function loadAll(silent = false) {
     state.user = session.user;
     state.mcpUrl = session.mcp_url;
     state.wsUrl = session.agent_websocket_url;
-    const [agents, keys, tokens] = await Promise.all([api("/agents"), api("/mcp-keys"), api("/enrollment-tokens")]);
+    const [agents, keys, tokens, catalog, bundles] = await Promise.all([api("/agents"), api("/mcp-keys"), api("/enrollment-tokens"), api("/profile-catalog"), api("/agent-bundles")]);
     state.agents = agents.agents;
     state.keys = keys.keys;
     state.tokens = tokens.tokens;
+    state.catalog = catalog.profiles;
+    state.bundles = bundles.bundles;
     showApp();
     render();
     if (!silent) toast("数据已刷新");
@@ -128,15 +130,34 @@ function renderTokens() {
   }).join("") : emptyState("还没有注册令牌", "创建令牌后只会展示一次完整启动命令");
 }
 
+function renderBuilder() {
+  $("#profile-catalog").innerHTML = state.catalog.length ? state.catalog.map((profile) => `<article class="catalog-item">
+    <header><h4>${escapeHtml(profile.name)}</h4><span class="profile">${escapeHtml(profile.id)}</span></header>
+    <p>${escapeHtml(profile.description)}</p>
+    <div class="catalog-meta"><span class="catalog-status">${profile.status === "stable" ? "稳定" : escapeHtml(profile.status)}</span>${profile.runtimes.map((runtime) => `<span>${escapeHtml(runtime)}</span>`).join("")}</div>
+  </article>`).join("") : emptyState("暂无可组装 Profile", "网关管理员尚未发布标准能力");
+
+  $("#bundles-list").innerHTML = state.bundles.length ? state.bundles.map((bundle) => {
+    const expired = bundle.expires_at * 1000 <= Date.now();
+    return `<article class="data-row">
+      <div><h3>${escapeHtml(bundle.name)}</h3><p>${escapeHtml(bundle.description || "暂无用途描述")}</p></div>
+      <code>${escapeHtml(bundle.runtime)} · ${escapeHtml(bundle.profiles.join(", "))}</code>
+      <time>${expired ? "已过期" : `有效期至 ${formatTime(bundle.expires_at)}`}</time>
+      <div class="row-actions">${expired ? "" : `<button class="secondary" data-download-bundle="${bundle.id}">下载 ZIP</button>`}</div>
+    </article>`;
+  }).join("") : emptyState("还没有组装记录", "选择标准 Profile，生成可独立部署的远程 Agent 包");
+}
+
 function render() {
   renderMetrics();
   renderAgents();
   renderKeys();
   renderTokens();
+  renderBuilder();
 }
 
 function switchView(view) {
-  const titles = { overview: "概览", agents: "远程 Agent", keys: "MCP Keys", tokens: "注册令牌" };
+  const titles = { overview: "概览", builder: "Agent 工作台", agents: "远程 Agent", keys: "MCP Keys", tokens: "注册令牌" };
   state.view = view;
   $$("#main-nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `view-${view}`));
@@ -176,6 +197,36 @@ async function createToken(name) {
   await loadAll(true);
 }
 
+async function createBundle(name, description, profiles) {
+  const result = await api("/agent-bundles", {
+    method: "POST",
+    body: JSON.stringify({ name, description, runtime: "python", profiles }),
+  });
+  const link = document.createElement("a");
+  link.href = result.bundle.download_url;
+  link.download = result.bundle.filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  showSecret("Agent 已组装", result.secret, result.command);
+  await loadAll(true);
+}
+
+function openBundleForm() {
+  const options = state.catalog.map((profile) => `<label class="profile-option"><input type="checkbox" name="profiles" value="${escapeHtml(profile.id)}" ${profile.id === "shell.v1" ? "checked" : ""}><span><strong>${escapeHtml(profile.name)} · ${escapeHtml(profile.id)}</strong><span>${escapeHtml(profile.description)}</span></span></label>`).join("");
+  openForm({
+    eyebrow: "Python Agent Builder",
+    title: "组装远程 Agent",
+    submit: "组装并下载",
+    fields: `<label>Agent 名称<input name="name" required maxlength="80" placeholder="例如 GPU Notebook"></label><label>用途描述<textarea name="description" maxlength="500" rows="3" placeholder="告诉 AI 这台设备适合做什么"></textarea></label><div class="profile-options">${options}</div>`,
+    onSubmit: (data) => {
+      const profiles = data.getAll("profiles");
+      if (!profiles.length) throw new Error("至少选择一个 Profile");
+      return createBundle(data.get("name"), data.get("description"), profiles);
+    },
+  });
+}
+
 function bindEvents() {
   $("#login-tab").onclick = () => setAuthMode("login");
   $("#register-tab").onclick = () => setAuthMode("register");
@@ -195,6 +246,7 @@ function bindEvents() {
   $("#mobile-menu").onclick = () => $(".sidebar").classList.toggle("open");
   $$("#main-nav button").forEach((button) => button.onclick = () => switchView(button.dataset.view));
   $("#new-key-button").onclick = () => openForm({ eyebrow: "MCP Access", title: "创建 MCP Key", submit: "创建 Key", fields: '<label>名称<input name="name" required maxlength="80" placeholder="例如 Claude Desktop"></label>', onSubmit: (data) => createKey(data.get("name")) });
+  $$('[data-action="new-bundle"]').forEach((button) => button.onclick = openBundleForm);
   $$('[data-action="new-token"]').forEach((button) => button.onclick = () => openForm({ eyebrow: "Agent Enrollment", title: "创建注册令牌", submit: "创建令牌", fields: '<label>Agent 名称<input name="name" required maxlength="80" placeholder="例如 GPU Notebook"></label>', onSubmit: (data) => createToken(data.get("name")) }));
   $("#dialog-form").onsubmit = async (event) => {
     event.preventDefault();
@@ -220,6 +272,7 @@ function bindEvents() {
     if (target.dataset.revokeAgent && confirm("撤销后该 Agent 的设备凭据将永久失效。继续吗？")) { await api(`/agents/${target.dataset.revokeAgent}`, { method: "DELETE" }); await loadAll(true); toast("Agent 已撤销"); }
     if (target.dataset.revokeKey && confirm("撤销后使用该 Key 的 MCP 客户端将立即失去访问权限。继续吗？")) { await api(`/mcp-keys/${target.dataset.revokeKey}`, { method: "DELETE" }); await loadAll(true); toast("MCP Key 已撤销"); }
     if (target.dataset.revokeToken && confirm("确定撤销这个注册令牌吗？")) { await api(`/enrollment-tokens/${target.dataset.revokeToken}`, { method: "DELETE" }); await loadAll(true); toast("注册令牌已撤销"); }
+    if (target.dataset.downloadBundle) { window.location.assign(`/api/agent-bundles/${target.dataset.downloadBundle}/download`); }
   };
 }
 

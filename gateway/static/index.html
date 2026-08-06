@@ -43,9 +43,10 @@
       <div class="sidebar-brand"><span class="brand-mark small">RG</span><strong>Remote Gateway</strong></div>
       <nav id="main-nav" aria-label="主导航">
         <button class="active" data-view="overview" type="button"><span>01</span>概览</button>
-        <button data-view="agents" type="button"><span>02</span>远程 Agent</button>
-        <button data-view="keys" type="button"><span>03</span>MCP Keys</button>
-        <button data-view="tokens" type="button"><span>04</span>注册令牌</button>
+        <button data-view="builder" type="button"><span>02</span>Agent 工作台</button>
+        <button data-view="agents" type="button"><span>03</span>远程 Agent</button>
+        <button data-view="keys" type="button"><span>04</span>MCP Keys</button>
+        <button data-view="tokens" type="button"><span>05</span>注册令牌</button>
       </nav>
       <div class="sidebar-foot">
         <span id="user-email"></span>
@@ -63,12 +64,25 @@
       <main class="content">
         <section id="view-overview" class="view active">
           <div class="metrics" id="metrics"></div>
-          <div class="section-heading"><div><h2>最近的 Agent</h2><p>当前账号下注册的远程执行环境</p></div><button class="primary" data-action="new-token" type="button">注册 Agent</button></div>
+          <div class="section-heading"><div><h2>最近的 Agent</h2><p>当前账号下注册的远程执行环境</p></div><button class="primary" data-action="new-bundle" type="button">组装 Agent</button></div>
           <div id="overview-agents" class="agent-list"></div>
         </section>
 
+        <section id="view-builder" class="view">
+          <div class="section-heading"><div><h2>Agent 工作台</h2><p>从可信 Profile 目录组装一个可独立搬运的 Python Agent</p></div><button class="primary" data-action="new-bundle" type="button">开始组装</button></div>
+          <div class="builder-intro">
+            <div><strong>固定 Core</strong><span>连接、认证、心跳、重连与请求路由</span></div>
+            <div><strong>按需 Profile</strong><span>只打包当前设备真正需要的标准能力</span></div>
+            <div><strong>一次性注册</strong><span>下载包不包含 Token，注册命令单独展示</span></div>
+          </div>
+          <div class="subsection-heading"><div><h3>可用 Profile</h3><p>目录由网关管理员维护，Agent 只能声明实际加载的 Handler</p></div></div>
+          <div id="profile-catalog" class="profile-catalog"></div>
+          <div class="subsection-heading"><div><h3>最近组装</h3><p>下载链接与注册令牌使用相同有效期</p></div></div>
+          <div id="bundles-list" class="data-list"></div>
+        </section>
+
         <section id="view-agents" class="view">
-          <div class="section-heading"><div><h2>远程 Agent</h2><p>设备状态、用途和标准 Profile</p></div><button class="primary" data-action="new-token" type="button">注册 Agent</button></div>
+          <div class="section-heading"><div><h2>远程 Agent</h2><p>设备状态、用途和标准 Profile</p></div><button class="primary" data-action="new-bundle" type="button">组装 Agent</button></div>
           <div id="agents-list" class="agent-list"></div>
         </section>
 
