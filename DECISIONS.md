@@ -173,3 +173,11 @@
 - **替代方案**：每次流水线使用新的 Enrollment Token；把 config 放进 Git 仓库、Artifact 或 Cache；增加可长期复用的第三种 CI Token；让网关预创建并导出设备凭据；为 GitHub 单独实现 OAuth App 与 Runner 管理系统。
 - **取舍**：不新增网关协议、秘钥类型和 CI 管理页面，文件配置与环境变量配置共享同一设备身份校验；代价是用户仍需先完成一次正常注册并手动把 config 写入 CI Secret。模板只面向手动、限时调试会话，不承诺常驻 Runner 或流水线编排。
 - **影响**：同一 Python Agent 可以运行在 GitHub Actions、Docker、Kubernetes Secret 和其他只读环境；Runner 会按实际系统重新声明 `shell.v1` 方言。设备凭据变量不会进入远程 Shell，但 Agent 仍拥有 CI Job 自身可访问的文件和其他环境信息，使用者必须避免向该 Step 注入无关生产秘钥。
+
+## 2026-08-06：`shell.v1` 显式关闭子进程标准输入
+
+- **决策**：官方 Python `shell.v1` 启动每个 Shell 进程时将 stdin 连接到 `DEVNULL`，不再继承 Agent 进程的本地终端输入。Agent 发布版本升级为 0.1.5，Core 与 WebSocket 协议版本保持不变。
+- **原因**：`shell.v1/exec` 的契约只有一次性 `command` 输入，没有远程 stdin 或交互终端。未显式配置 stdin 时，操作系统可能让子进程继承运行 Agent 的本地控制台，导致等待输入的远程命令读取本地用户在 Agent 窗口键入的内容，或者因部署环境不同而随机阻塞、收到 EOF。
+- **替代方案**：保留操作系统默认继承行为；把本地终端输入转发为远程 stdin；立即增加可交互 PTY；为 `exec` 增加一次性 stdin 参数。
+- **取舍**：需要交互输入的程序现在会立即收到 EOF，而不能借用本地键盘；换取跨前台终端、后台服务、容器和 CI 一致的非交互语义，并消除本地输入被远程命令意外消费的通道。
+- **影响**：普通命令、文件操作、stdout/stderr 捕获和退出码不变。编辑器、REPL、密码提示和 TUI 仍不属于 `shell.v1`；未来若有明确需求，应单独设计受限的一次性 stdin 或 `terminal.v1`。

@@ -35,7 +35,7 @@ class AgentBuilderTests(unittest.TestCase):
                     archive.read(f"{root}/remote_agent/manifest.json").decode("utf-8")
                 )
         self.assertEqual(manifest["profiles"], ["shell.v1"])
-        self.assertEqual(manifest["agent_version"], "0.1.4")
+        self.assertEqual(manifest["agent_version"], "0.1.5")
         self.assertEqual(manifest["core_version"], 4)
         self.assertEqual(manifest["build_id"], "12345678-1234-1234-1234-123456789012")
         self.assertEqual(manifest["agent"]["name"], "GPU Notebook")

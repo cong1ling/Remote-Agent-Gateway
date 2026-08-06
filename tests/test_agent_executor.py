@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -10,6 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from remote_agent.core import EnvironmentAgentConfig
 from remote_agent.profiles.shell_v1 import (
@@ -33,6 +35,42 @@ def python_command(runtime: ShellRuntime, code: str) -> str:
 
 
 class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exec_closes_inherited_local_stdin(self) -> None:
+        captured_options: dict[str, object] = {}
+
+        class CompletedProcess:
+            def __init__(self):
+                self.returncode = 0
+                self.stdout = asyncio.StreamReader()
+                self.stderr = asyncio.StreamReader()
+                self.stdout.feed_eof()
+                self.stderr.feed_eof()
+
+            async def wait(self) -> int:
+                return self.returncode
+
+        async def create_process(*args, **kwargs):
+            del args
+            captured_options.update(kwargs)
+            return CompletedProcess()
+
+        with tempfile.TemporaryDirectory() as directory:
+            executor = ShellExecutor(
+                Path(directory),
+                ShellRuntime("linux", "posix-sh", "/bin/sh"),
+            )
+            with patch(
+                "remote_agent.profiles.shell_v1.asyncio.create_subprocess_exec",
+                new=create_process,
+            ):
+                result = await executor.execute(
+                    "request-closed-stdin",
+                    {"command": "echo test", "timeout": 10},
+                )
+
+        self.assertEqual(result["exit_code"], 0)
+        self.assertIs(captured_options["stdin"], asyncio.subprocess.DEVNULL)
+
     async def test_environment_device_secret_is_not_inherited_by_shell(self) -> None:
         variable_name = "REMOTE_AGENT_CONFIG_B64_TEST"
         config = {

@@ -137,6 +137,7 @@ class ShellExecutor:
         process = await asyncio.create_subprocess_exec(
             *self.runtime.command_argv(command),
             cwd=self.workdir,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             **process_options,
