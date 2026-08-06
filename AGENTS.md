@@ -37,7 +37,9 @@
 - Agent 首次注册后获得独立设备凭据，并在重启后自动重连
 - Agent 的稳定 ID、名称、描述、Profile、在线状态和最后在线时间
 - WebSocket 长连接、认证、心跳、断线检测和自动重连
-- `shell.v1` 标准能力
+- Agent 工作台：选择网关维护的标准 Profile，组装并下载独立 Python Agent ZIP；普通用户优先使用该入口
+- 手动接入（高级）：仅签发 Enrollment Token，不生成 Agent 文件，只适用于已经持有兼容 Agent 程序或使用自动化部署的用户
+- `shell.v1` 标准能力及可查询的完整输入、输出、限制和运行时 Shell 方言
 - 固定 MCP 工具：
   - `list_agents`
   - `get_agent_capabilities`
@@ -55,6 +57,9 @@
 - Agent 只按网关定义的协议声明标准 Profile，不能动态注册任意 MCP 工具。
 - `shell.v1` 是网关预定义的标准能力，远程端必须真正实现对应处理器。
 - Profile 的名称、说明和操作定义由网关维护。
+- Profile 定义是固定协议契约，不要求所有 Agent 使用逐字节相同的实现。用户可以修改自己设备上的实现逻辑，但修改后若不再遵守契约，由该 Agent 自行承担连接失败、执行失败或结果被网关拒绝的后果。
+- 普通用户不能上传、动态下载或在运行时注册自定义 Profile/Handler。自行部署的网关管理员可以通过修改网关与 Agent 源码并发布新版本扩展标准 Profile，这属于部署级扩展，不属于用户动态 MCP 聚合。
+- 第一版不使用文件 Hash、代码签名或远程证明来强制 Agent 实现一致；网关通过协议版本、Profile 白名单、参数校验、结果校验和所有权隔离建立边界。
 - Agent 的 `description` 仅描述设备用途，不参与权限判断，也不是系统提示词。
 - MCP Access Key 与 Agent Enrollment Token 必须分离。
 - Agent Enrollment Token 仅用于首次注册，不作为长期设备凭据。
@@ -62,12 +67,29 @@
 - 不实现上传下载。网关不拥有或管理用户文件。
 - 不把项目扩展成传统 MCP 聚合网关。
 
+## Agent 与 Profile 当前协议
+
+- 远程实现固定拆分为 `remote_agent/core/` 与 `remote_agent/profiles/`。Core 负责凭据、Manifest、WebSocket、心跳、重连和协议路由；Profile Handler 负责具体能力执行。
+- Agent WebSocket 协议当前为 v2。握手中的 `profiles` 必须是结构化声明，至少包含 Profile ID 及该实现的 runtime 信息；不兼容早期仅发送字符串数组的旧 Agent。
+- 项目尚未正式发布，不为旧 Agent 草案维护双协议或兼容分支。协议发生破坏性修正时，应给出明确升级错误，并要求重新组装或注册 Agent；不得为兼容未发布草案破坏当前架构。
+- Agent 只能声明本地实际加载了 Handler、且网关 Profile Registry 已定义的能力。首次注册保存 Profile ID；重连时 ID 必须一致，运行时信息可以随当前环境更新。
+- `shell.v1` 表示“使用 Agent 启动时检测并声明的系统 Shell 方言执行命令字符串”，而不是一套跨平台统一的命令语言。
+- 官方 Python `shell.v1` 在启动时只检测一次 Shell，并在该进程生命周期内固定使用：
+  - Windows：依次选择 `pwsh`、`powershell.exe`、`cmd.exe`
+  - Linux/macOS：使用 `/bin/sh`
+  - 找不到可用 Shell：不能声明或启动 `shell.v1`
+- Agent 必须上报 `os`、`dialect` 和 `executable`；网关必须保存并通过网页、`list_agents` 和 `get_agent_capabilities` 向用户及 AI 暴露。
+- `remote_exec.command` 必须符合 Agent 声明的方言。网关至少校验 `shell.v1/exec` 返回的 `stdout: string`、`stderr: string` 和 `exit_code: integer`。
+- stdout 与 stderr 各最多捕获 2 MiB，超出部分附加截断标记；超时、取消、断线和心跳失活必须清理命令进程树及 Hub 中的连接和挂起请求。
+
 ## 第一版暂不实现
 
 - 上传下载
 - Agent 共享
 - 团队 RBAC
 - 路径级 Shell 权限
+- 用户上传插件、自定义 Handler、插件市场和运行时插件下载
+- Agent 二进制 Hash 强校验、代码签名和远程证明
 - 硬件 Profile
 - Go 或 Rust 重写
 - 复杂审计系统
@@ -75,6 +97,6 @@
 
 ## 最终验收闭环
 
-新用户可以注册登录，创建一次性 Agent Token，在另一台机器运行一条 Agent 启动命令；网页显示 Agent 在线；Claude 或 WorkBuddy 使用 MCP Access Key 连接网关，调用 `list_agents` 找到该 Agent，调用 `get_agent_capabilities` 理解其能力，并通过 `remote_exec` 成功执行 `pwd` 等命令并获得结果。
+新用户可以注册登录，通过 Agent 工作台组装 ZIP 并获得一次性 Agent Token，在另一台机器运行启动命令；网页显示 Agent 在线及其操作系统和 Shell 方言；Claude 或 WorkBuddy 使用 MCP Access Key 连接网关，调用 `list_agents` 找到该 Agent，调用 `get_agent_capabilities` 获取完整契约和运行时方言，并通过 `remote_exec` 成功执行符合该方言的目录查询等命令并获得结果。
 
 请直接开始实施，自主推进到上述闭环真正可运行并经过验证。
