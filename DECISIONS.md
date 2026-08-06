@@ -85,3 +85,11 @@
 - **替代方案**：固定当前环境的每个精确版本；不提供 Python 包；维护单独 requirements 文件。
 - **取舍**：安装更灵活、包构建自包含，但未来依赖发布不兼容更新时仍需调整上限。
 - **影响**：部署应通过 `pip install .` 或 Dockerfile 安装声明依赖，不应复用一个包含冲突版 FastAPI 的全局环境。
+
+## 2026-08-06：远程 Agent 拆分为固定 Core 与 Profile Handler
+
+- **决策**：将原本集中在 `agent.py` 的实现迁入独立 `remote_agent` 包；Core 只负责凭据、Manifest、连接、重连、协议解析和请求路由，具体能力由实现统一接口的 Profile Handler 提供。根目录 `agent.py` 仅保留兼容入口。
+- **原因**：远程部署物需要能够独立移植和按需组装，新增硬件或其他标准能力时也不应修改连接核心。Handler 注册表还能确保 Agent 只声明实际加载的 Profile。
+- **替代方案**：继续维护单文件 Agent；通过条件分支把所有能力写在 Runtime 中；立即开放 Python 第三方插件 API。
+- **取舍**：文件数量增加，但职责和构建边界清晰；当前 Handler 仍在同一进程中运行，暂不承担第三方插件隔离成本。
+- **影响**：Python Agent 默认由 `manifest.json` 选择 `shell.v1`；未来构建器可以复制固定 Core、选择 Profile 模块并生成新的 Manifest，而网关协议不需要改变。

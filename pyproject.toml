@@ -17,13 +17,14 @@ dependencies = [
 
 [project.scripts]
 remote-gateway = "gateway.__main__:main"
-remote-agent = "agent:main"
+remote-agent = "remote_agent.cli:main"
 
 [tool.setuptools]
 py-modules = ["agent"]
 
 [tool.setuptools.packages.find]
-include = ["gateway*"]
+include = ["gateway*", "remote_agent*"]
 
 [tool.setuptools.package-data]
 gateway = ["static/*"]
+remote_agent = ["manifest.json"]

@@ -1,0 +1,7 @@
+{
+  "runtime": "python",
+  "core_version": 1,
+  "profiles": [
+    "shell.v1"
+  ]
+}
