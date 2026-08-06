@@ -111,7 +111,7 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
                     "id": "posix-sh",
                     "label": "POSIX Shell",
                     "systems": ["Linux", "macOS"],
-                    "detection": ["/bin/sh"],
+                    "detection": ["/bin/sh", "PATH 中的 sh"],
                     "example": "pwd",
                 },
             ],

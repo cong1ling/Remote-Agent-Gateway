@@ -181,3 +181,11 @@
 - **替代方案**：保留操作系统默认继承行为；把本地终端输入转发为远程 stdin；立即增加可交互 PTY；为 `exec` 增加一次性 stdin 参数。
 - **取舍**：需要交互输入的程序现在会立即收到 EOF，而不能借用本地键盘；换取跨前台终端、后台服务、容器和 CI 一致的非交互语义，并消除本地输入被远程命令意外消费的通道。
 - **影响**：普通命令、文件操作、stdout/stderr 捕获和退出码不变。编辑器、REPL、密码提示和 TUI 仍不属于 `shell.v1`；未来若有明确需求，应单独设计受限的一次性 stdin 或 `terminal.v1`。
+
+## 2026-08-06：POSIX Shell 在标准路径缺失时从 PATH 查找
+
+- **决策**：非 Windows Agent 继续优先使用 `/bin/sh`；该路径不存在时，使用系统 PATH 查找名为 `sh` 的可执行文件。找到后仍声明 `shell.v1` 的 `posix-sh` 方言，不根据登录 Shell 或已安装的 Bash、Zsh、Fish 提高语法承诺。Agent 发布版本升级为 0.1.6，Core 与 WebSocket 协议版本保持不变。
+- **原因**：标准 Linux 与 macOS 通常提供 `/bin/sh`，但 Android Termux 等环境把 `sh` 安装在自己的前缀目录并通过 PATH 暴露。原实现完全忽略非 Windows 的 `which` 结果，会在兼容 Shell 实际存在时错误拒绝启动。
+- **替代方案**：继续硬编码 `/bin/sh`；直接使用 `$SHELL`；优先检测并声明 Bash、Zsh 或 Fish；为 Android 单独增加操作系统与 Profile 分支。
+- **取舍**：保留最小、可移植的 POSIX sh 契约，同时兼容非标准文件系统布局；PATH 中的 `sh` 由启动 Agent 的本地环境决定，但不会扩展 AI 可假设的命令语法。
+- **影响**：标准系统行为不变，Termux 和其他 PATH 提供 `sh` 的环境可以启用 `shell.v1`。只有 `/bin/sh` 与 PATH 中的 `sh` 都不存在时才报错；Windows 检测顺序完全不受影响。

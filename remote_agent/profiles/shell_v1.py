@@ -110,9 +110,10 @@ def detect_shell_runtime(
         raise FatalAgentError("当前 Windows 环境未找到 pwsh、powershell.exe 或 cmd.exe")
 
     operating_system = {"darwin": "macos", "linux": "linux"}.get(system, "posix")
-    if not is_file("/bin/sh"):
-        raise FatalAgentError("当前系统缺少 /bin/sh，无法启用 shell.v1")
-    return ShellRuntime(operating_system, "posix-sh", "/bin/sh")
+    executable = "/bin/sh" if is_file("/bin/sh") else which("sh")
+    if not executable:
+        raise FatalAgentError("当前系统未找到 /bin/sh 或 PATH 中的 sh，无法启用 shell.v1")
+    return ShellRuntime(operating_system, "posix-sh", executable)
 
 
 class ShellExecutor:

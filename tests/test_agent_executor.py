@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from remote_agent.core import EnvironmentAgentConfig
+from remote_agent.core import EnvironmentAgentConfig, FatalAgentError
 from remote_agent.profiles.shell_v1 import (
     MAX_CAPTURE_BYTES,
     TRUNCATION_MARKER,
@@ -185,11 +185,36 @@ class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.dialect, "cmd")
 
     def test_posix_detection_uses_bin_sh(self) -> None:
-        runtime = detect_shell_runtime("Linux", is_file=lambda path: path == "/bin/sh")
+        runtime = detect_shell_runtime(
+            "Linux",
+            which=lambda _: "/unexpected/sh",
+            is_file=lambda path: path == "/bin/sh",
+        )
         self.assertEqual(
             runtime.public_metadata(),
             {"os": "linux", "dialect": "posix-sh", "executable": "sh"},
         )
+        self.assertEqual(runtime.executable, "/bin/sh")
+
+    def test_posix_detection_falls_back_to_sh_on_path(self) -> None:
+        termux_sh = "/data/data/com.termux/files/usr/bin/sh"
+        runtime = detect_shell_runtime(
+            "Linux",
+            which=lambda name: termux_sh if name == "sh" else None,
+            is_file=lambda _: False,
+        )
+        self.assertEqual(runtime.operating_system, "linux")
+        self.assertEqual(runtime.dialect, "posix-sh")
+        self.assertEqual(runtime.executable, termux_sh)
+        self.assertEqual(runtime.public_metadata()["executable"], "sh")
+
+    def test_posix_detection_rejects_missing_sh(self) -> None:
+        with self.assertRaisesRegex(FatalAgentError, "PATH 中的 sh"):
+            detect_shell_runtime(
+                "Linux",
+                which=lambda _: None,
+                is_file=lambda _: False,
+            )
 
 
 if __name__ == "__main__":
