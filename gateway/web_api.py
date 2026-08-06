@@ -9,7 +9,12 @@ from .agent_builder import AgentBuildError, PythonAgentBuilder, new_bundle_id
 from .agent_hub import AgentHub
 from .config import Settings
 from .database import ConflictError, Database
-from .profiles import describe_profiles, profile_names, public_profile_catalog, validate_profiles
+from .profiles import (
+    describe_profile_declarations,
+    profile_names,
+    public_profile_catalog,
+    validate_profiles,
+)
 from .security import IssuedToken, hash_password, hash_token, issue_token, verify_password
 
 
@@ -48,6 +53,7 @@ def _agent_view(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
     result = dict(agent)
     result["online"] = hub.is_online(agent["id"])
     result["capabilities"] = profile_names(agent["profiles"])
+    result["requires_reenrollment"] = not agent["profile_declarations"]
     return result
 
 
@@ -272,7 +278,9 @@ def create_web_router(db: Database, settings: Settings, hub: AgentHub) -> APIRou
         if agent is None:
             raise HTTPException(status_code=404, detail="Agent 不存在")
         result = _agent_view(agent, hub)
-        result["profile_details"] = describe_profiles(agent["profiles"])
+        result["profile_details"] = describe_profile_declarations(
+            agent["profile_declarations"]
+        )
         return {"agent": result}
 
     @router.patch("/agents/{agent_id}")

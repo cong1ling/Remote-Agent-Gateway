@@ -5,8 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from gateway.agent_protocol import AGENT_PROTOCOL_VERSION
+from gateway.profiles import SHELL_MAX_CAPTURE_BYTES, SHELL_TRUNCATION_MARKER
 from remote_agent.core import AgentConfig, FatalAgentError, RemoteAgent, load_manifest
+from remote_agent.core.runtime import PROTOCOL_VERSION
 from remote_agent.profiles import build_profile_handlers
+from remote_agent.profiles.shell_v1 import MAX_CAPTURE_BYTES, TRUNCATION_MARKER
 
 
 class RemoteAgentProfileTests(unittest.TestCase):
@@ -29,7 +33,16 @@ class RemoteAgentProfileTests(unittest.TestCase):
                 handlers=handlers,
             )
         self.assertEqual(agent.profile_ids, ["shell.v1"])
-        self.assertEqual(agent.hello_message()["profiles"], ["shell.v1"])
+        hello = agent.hello_message()
+        self.assertEqual(PROTOCOL_VERSION, AGENT_PROTOCOL_VERSION)
+        self.assertEqual(hello["v"], 2)
+        self.assertEqual(hello["profiles"][0]["id"], "shell.v1")
+        self.assertIn(
+            hello["profiles"][0]["runtime"]["dialect"],
+            {"powershell", "cmd", "posix-sh"},
+        )
+        self.assertEqual(MAX_CAPTURE_BYTES, SHELL_MAX_CAPTURE_BYTES)
+        self.assertEqual(TRUNCATION_MARKER.decode("ascii"), SHELL_TRUNCATION_MARKER)
 
     def test_unknown_profile_cannot_be_declared_without_handler(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -24,7 +24,8 @@ class AgentHubTests(unittest.IsolatedAsyncioTestCase):
         self.hub = AgentHub()
         self.socket_a = FakeWebSocket()
         self.socket_b = FakeWebSocket()
-        await self.hub.register(AgentConnection("agent-a", "user-a", self.socket_a))
+        self.connection_a = AgentConnection("agent-a", "user-a", self.socket_a)
+        await self.hub.register(self.connection_a)
         await self.hub.register(AgentConnection("agent-b", "user-b", self.socket_b))
 
     async def test_result_can_only_resolve_its_own_agent_request(self) -> None:
@@ -32,6 +33,7 @@ class AgentHubTests(unittest.IsolatedAsyncioTestCase):
             self.hub.execute("agent-a", "shell.v1", "exec", {"command": "pwd"}, 2)
         )
         await asyncio.sleep(0)
+        self.assertEqual(self.socket_a.messages[0]["v"], 2)
         request_id = self.socket_a.messages[0]["request_id"]
 
         await self.hub.resolve(
@@ -65,6 +67,20 @@ class AgentHubTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AgentOfflineError):
             await task_a
         self.assertEqual((await task_b)["stdout"], "b")
+
+    async def test_heartbeat_unregisters_stale_connection_and_fails_pending_requests(self) -> None:
+        task = asyncio.create_task(
+            self.hub.execute("agent-a", "shell.v1", "exec", {"command": "pwd"}, 2)
+        )
+        await asyncio.sleep(0)
+        self.connection_a.last_pong -= 120
+
+        await self.hub.heartbeat(timeout=60)
+
+        self.assertTrue(self.socket_a.closed)
+        self.assertFalse(self.hub.is_online("agent-a"))
+        with self.assertRaises(AgentOfflineError):
+            await task
 
 
 if __name__ == "__main__":

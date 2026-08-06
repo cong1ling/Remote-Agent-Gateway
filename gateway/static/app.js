@@ -76,11 +76,23 @@ function emptyState(title, detail) {
   return `<div class="empty"><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div></div>`;
 }
 
+function shellRuntimeLabel(agent) {
+  const declaration = (agent.profile_declarations || []).find((profile) => profile.id === "shell.v1");
+  if (!declaration?.runtime) return "";
+  const osLabels = { windows: "Windows", linux: "Linux", macos: "macOS", posix: "POSIX" };
+  const dialectLabels = { powershell: "PowerShell", cmd: "CMD", "posix-sh": "/bin/sh" };
+  const osName = osLabels[declaration.runtime.os] || declaration.runtime.os;
+  const shellName = dialectLabels[declaration.runtime.dialect] || declaration.runtime.dialect;
+  return `${osName} · ${shellName}`;
+}
+
 function agentCard(agent) {
   const profiles = (agent.profiles || []).map((profile) => `<span class="profile">${escapeHtml(profile)}</span>`).join("");
+  const shellRuntime = shellRuntimeLabel(agent);
+  const upgrade = agent.requires_reenrollment ? '<span class="upgrade-badge">需重新注册</span>' : "";
   return `<article class="agent-card">
     <div class="agent-title"><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.description || "暂无用途描述")}</p></div>
-    <div class="agent-meta"><span class="status ${agent.online ? "online" : ""}">${agent.online ? "在线" : "离线"}</span>${profiles}<span>${formatTime(agent.last_seen_at)}</span></div>
+    <div class="agent-meta"><span class="status ${agent.online ? "online" : ""}">${agent.online ? "在线" : "离线"}</span>${upgrade}${profiles}${shellRuntime ? `<span class="runtime-badge">${escapeHtml(shellRuntime)}</span>` : ""}<span>${formatTime(agent.last_seen_at)}</span></div>
     <div class="row-actions"><button class="secondary" data-edit-agent="${agent.id}">编辑</button><button class="danger" data-revoke-agent="${agent.id}">撤销</button></div>
   </article>`;
 }
@@ -134,6 +146,11 @@ function renderBuilder() {
   $("#profile-catalog").innerHTML = state.catalog.length ? state.catalog.map((profile) => `<article class="catalog-item">
     <header><h4>${escapeHtml(profile.name)}</h4><span class="profile">${escapeHtml(profile.id)}</span></header>
     <p>${escapeHtml(profile.description)}</p>
+    <div class="profile-contract">${(profile.actions || []).map((action) => {
+      const parameters = (action.parameters || []).map((parameter) => `${parameter.name}${parameter.required ? "" : "?"}: ${parameter.type}`).join(" · ");
+      const returns = (action.returns || []).map((field) => `${field.name}: ${field.type}`).join(" · ");
+      return `<strong>${escapeHtml(action.name)}</strong><code>${escapeHtml(parameters)}</code><span>返回 ${escapeHtml(returns)}</span>`;
+    }).join("")}</div>
     <div class="catalog-meta"><span class="catalog-status">${profile.status === "stable" ? "稳定" : escapeHtml(profile.status)}</span>${profile.runtimes.map((runtime) => `<span>${escapeHtml(runtime)}</span>`).join("")}</div>
   </article>`).join("") : emptyState("暂无可组装 Profile", "网关管理员尚未发布标准能力");
 

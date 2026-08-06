@@ -8,6 +8,8 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from .agent_protocol import AGENT_PROTOCOL_VERSION
+
 
 class AgentError(Exception):
     pass
@@ -102,7 +104,7 @@ class AgentHub:
         try:
             await connection.send(
                 {
-                    "v": 1,
+                    "v": AGENT_PROTOCOL_VERSION,
                     "type": "request",
                     "request_id": request_id,
                     "profile": profile,
@@ -113,7 +115,13 @@ class AgentHub:
             message = await asyncio.wait_for(future, timeout=timeout + 5)
         except asyncio.TimeoutError as exc:
             try:
-                await connection.send({"v": 1, "type": "cancel", "request_id": request_id})
+                await connection.send(
+                    {
+                        "v": AGENT_PROTOCOL_VERSION,
+                        "type": "cancel",
+                        "request_id": request_id,
+                    }
+                )
             except Exception:
                 pass
             raise AgentCommandError("远程命令等待超时") from exc
@@ -144,26 +152,33 @@ class AgentHub:
         if connection is not None:
             connection.last_pong = time.monotonic()
 
-    async def heartbeat(self, timeout: float = 60) -> list[str]:
+    async def heartbeat(self, timeout: float = 60) -> None:
         now = time.monotonic()
-        stale: list[str] = []
+        stale: dict[str, AgentConnection] = {}
         for agent_id, connection in list(self._connections.items()):
             if now - connection.last_pong > timeout:
-                stale.append(agent_id)
+                stale[agent_id] = connection
                 try:
                     await connection.websocket.close(code=4002, reason="心跳超时")
                 except RuntimeError:
                     pass
                 continue
             try:
-                await connection.send({"v": 1, "type": "ping", "ts": int(time.time())})
+                await connection.send(
+                    {
+                        "v": AGENT_PROTOCOL_VERSION,
+                        "type": "ping",
+                        "ts": int(time.time()),
+                    }
+                )
             except Exception:
-                stale.append(agent_id)
+                stale[agent_id] = connection
                 try:
                     await connection.websocket.close()
                 except RuntimeError:
                     pass
-        return stale
+        for agent_id, connection in stale.items():
+            await self.unregister(agent_id, connection.websocket)
 
     async def close_all(self) -> None:
         for connection in list(self._connections.values()):
@@ -180,4 +195,3 @@ class AgentHub:
             await connection.websocket.close(code=4003, reason=reason)
         except RuntimeError:
             pass
-

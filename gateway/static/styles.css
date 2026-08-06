@@ -94,6 +94,10 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .catalog-item header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .catalog-item h4 { margin: 0; font-size: 14px; }
 .catalog-item p { margin: 10px 0 13px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.profile-contract { margin: 0 0 13px; padding: 10px 11px; display: grid; gap: 5px; border-left: 2px solid #8fa8bf; background: #f4f7fa; }
+.profile-contract strong { font-size: 12px; }
+.profile-contract code { color: #334b61; font-size: 11px; white-space: normal; overflow-wrap: anywhere; }
+.profile-contract span { color: var(--muted); font-size: 11px; }
 .catalog-meta { display: flex; gap: 7px; flex-wrap: wrap; }
 .catalog-meta span { padding: 3px 7px; border-radius: 4px; color: #4d5f56; background: var(--soft); font-size: 11px; }
 .catalog-status { color: var(--accent) !important; background: #e2f4eb !important; }
@@ -115,6 +119,8 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .status.online { color: var(--accent); }
 .status.online::before { background: #20a36c; box-shadow: 0 0 0 3px #e2f4eb; }
 .profile { padding: 3px 7px; border-radius: 4px; color: var(--blue); background: #edf4fb; }
+.runtime-badge { padding: 3px 7px; border-radius: 4px; color: #6b4d12; background: #fff3d9; }
+.upgrade-badge { padding: 3px 7px; border-radius: 4px; color: var(--danger); background: #fbe9e7; }
 .row-actions { display: flex; gap: 7px; justify-content: flex-end; }
 .row-actions button { min-height: 32px; padding: 5px 10px; font-size: 12px; }
 .data-row { min-height: 70px; padding: 14px 16px; display: grid; grid-template-columns: minmax(140px, 1fr) minmax(130px, .7fr) minmax(150px, .7fr) auto; align-items: center; gap: 16px; }

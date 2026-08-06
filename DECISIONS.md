@@ -101,3 +101,19 @@
 - **替代方案**：下载始终包含全部 Profile；允许用户上传 Python 插件；把 Enrollment Token 固化进配置文件；只提供源码目录而不提供网页构建。
 - **取舍**：当前 Profile Catalog 仍由代码维护，新增 Profile 需要管理员发布新版本；换取构建结果可审计、协议定义一致和更小的供应链攻击面。
 - **影响**：首个构建目标仅为 Python，下载包包含 `run.py`、固定 Core、选中 Profile、Manifest 和 `requirements.txt`。组装记录及下载均按用户隔离，并与 Enrollment Token 共享过期时间。
+
+## 2026-08-06：`shell.v1` 显式声明自动检测到的 Shell 方言
+
+- **决策**：官方 Python Agent 启动时只检测一次 Shell，并在运行期间固定使用该执行器。Windows 依次选择 `pwsh`、`powershell.exe`、`cmd.exe`，Linux 与 macOS 使用 `/bin/sh`；Agent WebSocket 协议升级为 v2，Profile 声明必须携带操作系统、方言和可执行文件名。网关保存并向网页及 MCP 暴露该声明，同时校验 `shell.v1/exec` 的返回结构。
+- **原因**：Shell 命令语言并不跨平台统一，单独声明 `shell.v1` 无法让 AI 判断应该生成 PowerShell、CMD 还是 POSIX Shell 命令。显式选择执行器还能避免 Python 根据宿主环境隐式决定 Shell，确保同一 Agent 运行期间语义稳定。
+- **替代方案**：继续使用 `create_subprocess_shell` 的系统默认行为；拆分为 `powershell.v1`、`cmd.v1` 和 `posix-shell.v1`；要求所有系统安装统一 Shell；对旧握手格式保留兼容分支。
+- **取舍**：Profile Catalog 仍只需要维护一个 `shell.v1`，但命令本身仍需符合设备声明的方言。早期 Agent 脚本无法继续连接，需要重新组装或注册；换取无双协议分支的清晰契约。
+- **影响**：`list_agents`、`get_agent_capabilities`、Agent 管理页面和 Profile Catalog 会展示运行时方言及输入输出契约；Windows 执行不再默认落入 `cmd.exe`，PowerShell 可用时优先使用 PowerShell。现有账号、MCP Key 和 Enrollment Token 数据不受影响。
+
+## 2026-08-06：心跳检测在 Hub 内立即注销失活连接
+
+- **决策**：`AgentHub.heartbeat` 在关闭超时或发送失败的 WebSocket 后，立即从在线连接表移除对应 Agent 并失败其挂起请求，不再返回一个依赖调用方二次处理的 stale ID 列表。
+- **原因**：仅关闭 WebSocket 会把最终清理依赖于连接处理协程稍后收到断开事件；关闭握手延迟或异常时，Agent 可能继续被短暂判定为在线，挂起请求也无法及时结束。
+- **替代方案**：由应用心跳循环消费 stale 列表；继续依赖 WebSocket 处理器的 `finally` 清理；增加单独的离线清理任务。
+- **取舍**：WebSocket 处理器随后再次注销时会成为无操作，但 Hub 自身的在线状态和请求生命周期变得即时且自洽。
+- **影响**：心跳超时后网页和 MCP 会更快显示 Agent 离线，发往该 Agent 的待处理命令立即收到离线错误。

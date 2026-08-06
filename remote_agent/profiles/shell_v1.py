@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import locale
 import os
+import platform
 import signal
+import shutil
 import subprocess
-from pathlib import Path
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+
+from remote_agent.core.errors import FatalAgentError
 
 from .base import ProfileHandler
 
@@ -14,9 +22,99 @@ MAX_CAPTURE_BYTES = 2 * 1024 * 1024
 TRUNCATION_MARKER = b"\n[output truncated by remote agent]\n"
 
 
+@dataclass(frozen=True, slots=True)
+class ShellRuntime:
+    operating_system: str
+    dialect: str
+    executable: str
+
+    def public_metadata(self) -> dict[str, str]:
+        if self.operating_system == "windows":
+            executable_name = PureWindowsPath(self.executable).name
+        else:
+            executable_name = PurePosixPath(self.executable).name
+        return {
+            "os": self.operating_system,
+            "dialect": self.dialect,
+            "executable": executable_name,
+        }
+
+    def command_argv(self, command: str) -> list[str]:
+        if self.dialect == "powershell":
+            script = (
+                "$OutputEncoding = [Console]::OutputEncoding = "
+                "[System.Text.UTF8Encoding]::new($false)\n"
+                "$global:LASTEXITCODE = $null\n"
+                "$script:__remoteAgentShellSuccess = $false\n"
+                "$script:__remoteAgentNativeExitCode = $null\n"
+                "& {\n"
+                f"{command}\n"
+                "  $script:__remoteAgentShellSuccess = $?\n"
+                "  $script:__remoteAgentNativeExitCode = $LASTEXITCODE\n"
+                "}\n"
+                "if (-not $script:__remoteAgentShellSuccess) {\n"
+                "  if ($null -ne $script:__remoteAgentNativeExitCode -and "
+                "$script:__remoteAgentNativeExitCode -ne 0) { "
+                "exit $script:__remoteAgentNativeExitCode }\n"
+                "  exit 1\n"
+                "}\n"
+                "exit 0\n"
+            )
+            encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+            return [
+                self.executable,
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                encoded,
+            ]
+        if self.dialect == "cmd":
+            return [self.executable, "/D", "/C", command]
+        return [self.executable, "-c", command]
+
+    @property
+    def output_encoding(self) -> str:
+        if self.dialect == "powershell":
+            return "utf-8"
+        return locale.getpreferredencoding(False) or "utf-8"
+
+
+def detect_shell_runtime(
+    system_name: str | None = None,
+    *,
+    which: Callable[[str], str | None] = shutil.which,
+    is_file: Callable[[str], bool] = os.path.isfile,
+    environment: Mapping[str, str] | None = None,
+) -> ShellRuntime:
+    system = (system_name or platform.system()).strip().lower()
+    if environment is None:
+        environment = os.environ
+    if system == "windows":
+        pwsh = which("pwsh")
+        if pwsh:
+            return ShellRuntime("windows", "powershell", pwsh)
+        powershell = which("powershell.exe") or which("powershell")
+        if powershell:
+            return ShellRuntime("windows", "powershell", powershell)
+        comspec = environment.get("COMSPEC")
+        if comspec and is_file(comspec):
+            return ShellRuntime("windows", "cmd", comspec)
+        command_prompt = which("cmd.exe") or which("cmd")
+        if command_prompt:
+            return ShellRuntime("windows", "cmd", command_prompt)
+        raise FatalAgentError("当前 Windows 环境未找到 pwsh、powershell.exe 或 cmd.exe")
+
+    operating_system = {"darwin": "macos", "linux": "linux"}.get(system, "posix")
+    if not is_file("/bin/sh"):
+        raise FatalAgentError("当前系统缺少 /bin/sh，无法启用 shell.v1")
+    return ShellRuntime(operating_system, "posix-sh", "/bin/sh")
+
+
 class ShellExecutor:
-    def __init__(self, workdir: Path):
+    def __init__(self, workdir: Path, runtime: ShellRuntime | None = None):
         self.workdir = workdir
+        self.runtime = runtime or detect_shell_runtime()
         self.processes: dict[str, asyncio.subprocess.Process] = {}
 
     async def execute(self, request_id: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -32,8 +130,8 @@ class ShellExecutor:
             process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             process_options["start_new_session"] = True
-        process = await asyncio.create_subprocess_shell(
-            command,
+        process = await asyncio.create_subprocess_exec(
+            *self.runtime.command_argv(command),
             cwd=self.workdir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -60,8 +158,8 @@ class ShellExecutor:
 
         stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
         return {
-            "stdout": stdout.decode("utf-8", "replace"),
-            "stderr": stderr.decode("utf-8", "replace"),
+            "stdout": stdout.decode(self.runtime.output_encoding, "replace"),
+            "stderr": stderr.decode(self.runtime.output_encoding, "replace"),
             "exit_code": process.returncode,
         }
 
@@ -119,6 +217,9 @@ class ShellV1Profile(ProfileHandler):
     def __init__(self, workdir: Path):
         self.executor = ShellExecutor(workdir)
 
+    def runtime_metadata(self) -> dict[str, str]:
+        return self.executor.runtime.public_metadata()
+
     async def execute(
         self,
         action: str,
@@ -131,4 +232,3 @@ class ShellV1Profile(ProfileHandler):
 
     async def cancel(self, request_id: str) -> None:
         await self.executor.cancel(request_id)
-

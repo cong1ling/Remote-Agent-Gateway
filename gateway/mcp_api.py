@@ -13,7 +13,11 @@ from mcp.server.transport_security import TransportSecuritySettings
 from .agent_hub import AgentCommandError, AgentHub, AgentOfflineError
 from .config import Settings
 from .database import Database
-from .profiles import describe_profiles, profile_names
+from .profiles import (
+    describe_profile_declarations,
+    profile_names,
+    validate_profile_result,
+)
 from .security import hash_token
 
 
@@ -48,6 +52,8 @@ def _agent_summary(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
         "description": agent["description"],
         "status": "online" if hub.is_online(agent["id"]) else "offline",
         "capabilities": profile_names(agent["profiles"]),
+        "profile_declarations": agent["profile_declarations"],
+        "requires_reenrollment": not agent["profile_declarations"],
         "last_seen_at": agent["last_seen_at"],
     }
 
@@ -98,12 +104,16 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             raise ToolError("Agent 不存在或不属于当前用户")
         return {
             "agent": _agent_summary(agent, hub),
-            "profiles": describe_profiles(agent["profiles"]),
+            "profiles": describe_profile_declarations(agent["profile_declarations"]),
+            "gateway_limits": {
+                "max_command_timeout_seconds": settings.max_command_timeout,
+            },
         }
 
     @server.tool(
         description=(
             "在指定在线 Agent 上执行 Shell 命令，并返回 stdout、stderr 和 exit_code。"
+            "command 必须符合 get_agent_capabilities 返回的 Shell 方言。"
             "该能力拥有 Agent 所在系统账号的完整 Shell 权限。"
         )
     )
@@ -125,7 +135,7 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
         if timeout < 1 or timeout > settings.max_command_timeout:
             raise ToolError(f"timeout 必须在 1 到 {settings.max_command_timeout} 秒之间")
         try:
-            return await hub.execute(
+            result = await hub.execute(
                 agent_id,
                 "shell.v1",
                 "exec",
@@ -134,6 +144,9 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             )
         except (AgentOfflineError, AgentCommandError) as exc:
             raise ToolError(str(exc)) from exc
+        try:
+            return validate_profile_result("shell.v1", "exec", result)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
 
     return server
-

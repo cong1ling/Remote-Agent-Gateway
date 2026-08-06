@@ -17,7 +17,7 @@ from .config import AgentConfig
 from .errors import FatalAgentError
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 RECONNECT_MIN_SECONDS = 2
 RECONNECT_MAX_SECONDS = 30
 
@@ -48,11 +48,15 @@ class RemoteAgent:
     def profile_ids(self) -> list[str]:
         return sorted(self.handlers)
 
+    @property
+    def profile_declarations(self) -> list[dict[str, Any]]:
+        return [self.handlers[profile_id].declaration() for profile_id in self.profile_ids]
+
     def hello_message(self) -> dict[str, Any]:
         base: dict[str, Any] = {
             "v": PROTOCOL_VERSION,
             "type": "hello",
-            "profiles": self.profile_ids,
+            "profiles": self.profile_declarations,
             "metadata": {
                 "hostname": socket.gethostname(),
                 "platform": platform.platform(),
@@ -134,6 +138,10 @@ class RemoteAgent:
             await self.send(websocket, self.hello_message())
             raw = await asyncio.wait_for(websocket.recv(), timeout=15)
             response = json.loads(raw)
+            if not isinstance(response, dict) or response.get("v") != PROTOCOL_VERSION:
+                raise FatalAgentError(
+                    f"网关协议版本不兼容，需要 v{PROTOCOL_VERSION}；请更新网关或 Agent"
+                )
             if response.get("type") == "error":
                 raise FatalAgentError(str(response.get("error") or "Agent 认证失败"))
             if response.get("type") == "registered":
@@ -149,12 +157,15 @@ class RemoteAgent:
             elif response.get("type") != "ready":
                 raise FatalAgentError("网关返回了无效的握手响应")
 
-            print(
-                f"Agent 已连接: {self.gateway_url} ({', '.join(self.profile_ids)})",
-                flush=True,
+            profile_summary = ", ".join(
+                f"{declaration['id']} [{declaration['runtime'].get('dialect', 'unknown')}]"
+                for declaration in self.profile_declarations
             )
+            print(f"Agent 已连接: {self.gateway_url} ({profile_summary})", flush=True)
             async for raw_message in websocket:
                 message = json.loads(raw_message)
+                if not isinstance(message, dict) or message.get("v") != PROTOCOL_VERSION:
+                    continue
                 message_type = message.get("type")
                 if message_type == "ping":
                     await self.send(
@@ -188,7 +199,12 @@ class RemoteAgent:
                 delay = RECONNECT_MIN_SECONDS
             except FatalAgentError:
                 raise
-            except (OSError, TimeoutError, websockets.ConnectionClosed, json.JSONDecodeError) as exc:
+            except (
+                OSError,
+                TimeoutError,
+                websockets.ConnectionClosed,
+                json.JSONDecodeError,
+            ) as exc:
                 print(f"连接中断: {exc}; {delay} 秒后重试", file=sys.stderr, flush=True)
             finally:
                 for task in list(self.running.values()):
@@ -197,4 +213,3 @@ class RemoteAgent:
                 self.request_profiles.clear()
             await asyncio.sleep(delay)
             delay = min(delay * 2, RECONNECT_MAX_SECONDS)
-

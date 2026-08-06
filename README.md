@@ -29,6 +29,19 @@ Remote Agent
 
 `remote_exec` 拥有 Agent 所在系统账号的完整 Shell 权限。只应在自己拥有或明确获准管理的设备上运行 Agent。
 
+### `shell.v1` 契约
+
+`shell.v1` 接收符合远程设备所声明 Shell 方言的命令字符串。官方 Python Agent 在启动时检测一次可用 Shell，随后在本次运行期间固定使用该实现：
+
+| 系统 | 检测顺序 | 声明方言 |
+|---|---|---|
+| Windows | `pwsh` → `powershell.exe` → `cmd.exe` | `powershell` 或 `cmd` |
+| Linux / macOS | `/bin/sh` | `posix-sh` |
+
+Agent 会在注册与重连握手中上报操作系统、方言和可执行文件名；`list_agents` 与 `get_agent_capabilities` 会返回这些信息。命令返回 `stdout`、`stderr` 和 `exit_code`，stdout 与 stderr 各最多保留 2 MiB，超时或取消会终止本次命令的进程树。
+
+Agent WebSocket 协议当前为 v2，不兼容早期未携带结构化 Profile 运行时信息的脚本；请重新从工作台组装 Agent。
+
 ## 本地启动
 
 需要 Python 3.11 或更高版本。
@@ -127,7 +140,7 @@ docker compose up -d --build
 
 ```powershell
 python -m unittest discover -v
-python -m compileall -q gateway agent.py tests
+python -m compileall -q gateway remote_agent agent.py tests
 ```
 
 当前范围刻意不包含上传下载、Agent 分享、团队 RBAC、路径级 Shell 权限、硬件 Profile 和多进程扩展。

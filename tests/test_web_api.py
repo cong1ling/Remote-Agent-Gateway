@@ -12,6 +12,18 @@ from gateway.app import create_app
 from gateway.config import Settings
 
 
+SHELL_DECLARATIONS = [
+    {
+        "id": "shell.v1",
+        "runtime": {
+            "os": "windows",
+            "dialect": "powershell",
+            "executable": "powershell.exe",
+        },
+    }
+]
+
+
 class WebApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
@@ -68,12 +80,12 @@ class WebApiTests(unittest.TestCase):
         secret = created.json()["secret"]
 
         hello = {
-            "v": 1,
+            "v": 2,
             "type": "hello",
             "enrollment_token": secret,
             "name": "GPU Notebook",
             "description": "模型训练环境",
-            "profiles": ["shell.v1"],
+            "profiles": SHELL_DECLARATIONS,
         }
         with self.client.websocket_connect("/ws/agent") as websocket:
             websocket.send_json(hello)
@@ -83,6 +95,16 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(len(agents), 1)
             self.assertTrue(agents[0]["online"])
             self.assertEqual(agents[0]["capabilities"], ["远程 Shell"])
+            self.assertEqual(agents[0]["profile_declarations"], SHELL_DECLARATIONS)
+            self.assertFalse(agents[0]["requires_reenrollment"])
+            details = self.client.get(f"/api/agents/{agents[0]['id']}").json()["agent"]
+            self.assertEqual(details["profile_details"][0]["runtime"]["dialect"], "powershell")
+            action = details["profile_details"][0]["actions"][0]
+            self.assertEqual(action["name"], "exec")
+            self.assertEqual(
+                [field["name"] for field in action["returns"]],
+                ["stdout", "stderr", "exit_code"],
+            )
 
         with self.client.websocket_connect("/ws/agent") as websocket:
             websocket.send_json(hello)
@@ -100,16 +122,35 @@ class WebApiTests(unittest.TestCase):
         self.assertNotIn("--name", payload["command"])
         self.assertEqual(self.client.get("/api/agent-bundles").json()["bundles"], [])
 
+    def test_old_agent_protocol_is_rejected_with_upgrade_message(self) -> None:
+        self.register()
+        created = self.client.post("/api/enrollment-tokens", json={"name": "Old Agent"})
+        with self.client.websocket_connect("/ws/agent") as websocket:
+            websocket.send_json(
+                {
+                    "v": 1,
+                    "type": "hello",
+                    "enrollment_token": created.json()["secret"],
+                    "name": "Old Agent",
+                    "description": "",
+                    "profiles": ["shell.v1"],
+                }
+            )
+            error = websocket.receive_json()
+        self.assertEqual(error["v"], 2)
+        self.assertIn("协议版本不兼容", error["error"])
+        self.assertIn("重新下载新版 Agent", error["error"])
+
     def test_agent_is_hidden_from_another_user(self) -> None:
         self.register()
         created = self.client.post("/api/enrollment-tokens", json={"name": "Private Agent"})
         hello = {
-            "v": 1,
+            "v": 2,
             "type": "hello",
             "enrollment_token": created.json()["secret"],
             "name": "Private Agent",
             "description": "",
-            "profiles": ["shell.v1"],
+            "profiles": SHELL_DECLARATIONS,
         }
         with self.client.websocket_connect("/ws/agent") as websocket:
             websocket.send_json(hello)

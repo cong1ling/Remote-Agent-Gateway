@@ -7,8 +7,9 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .agent_hub import AgentConnection, AgentHub
+from .agent_protocol import AGENT_PROTOCOL_VERSION
 from .database import Database
-from .profiles import validate_profiles
+from .profiles import profile_ids, validate_profile_declarations
 from .security import hash_token, issue_token
 
 
@@ -28,9 +29,14 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
     agent_id: str | None = None
     try:
         hello = await asyncio.wait_for(websocket.receive_json(), timeout=15)
-        if not isinstance(hello, dict) or hello.get("v") != 1 or hello.get("type") != "hello":
+        if not isinstance(hello, dict) or hello.get("type") != "hello":
             raise ValueError("无效的 Agent 握手消息")
-        profiles = validate_profiles(hello.get("profiles"))
+        if hello.get("v") != AGENT_PROTOCOL_VERSION:
+            raise ValueError(
+                f"Agent 协议版本不兼容，需要 v{AGENT_PROTOCOL_VERSION}；请重新下载新版 Agent"
+            )
+        profile_declarations = validate_profile_declarations(hello.get("profiles"))
+        profiles = profile_ids(profile_declarations)
 
         enrollment_token = hello.get("enrollment_token")
         if isinstance(enrollment_token, str) and enrollment_token:
@@ -45,14 +51,14 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
                 credential.digest,
                 name,
                 description,
-                profiles,
+                profile_declarations,
             )
             if registered is None:
                 raise ValueError("注册令牌无效、已过期或已被使用")
             user_id = registered["user_id"]
             await websocket.send_json(
                 {
-                    "v": 1,
+                    "v": AGENT_PROTOCOL_VERSION,
                     "type": "registered",
                     "agent_id": agent_id,
                     "credential": credential.value,
@@ -65,9 +71,12 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
             if agent is None:
                 raise ValueError("Agent 设备凭据无效或已被撤销")
             if agent["profiles"] != profiles:
-                raise ValueError("Agent Profile 与注册记录不一致")
+                raise ValueError("Agent Profile 与注册记录不一致，请重新注册 Agent")
+            db.update_agent_profile_declarations(agent_id, profile_declarations)
             user_id = agent["user_id"]
-            await websocket.send_json({"v": 1, "type": "ready", "agent_id": agent_id})
+            await websocket.send_json(
+                {"v": AGENT_PROTOCOL_VERSION, "type": "ready", "agent_id": agent_id}
+            )
 
         connection = AgentConnection(agent_id, user_id, websocket)
         await hub.register(connection)
@@ -75,7 +84,7 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
 
         while True:
             message = await websocket.receive_json()
-            if not isinstance(message, dict) or message.get("v") != 1:
+            if not isinstance(message, dict) or message.get("v") != AGENT_PROTOCOL_VERSION:
                 continue
             message_type = message.get("type")
             if message_type == "pong":
@@ -84,7 +93,9 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
             elif message_type == "result":
                 await hub.resolve(agent_id, message)
     except (ValueError, asyncio.TimeoutError) as exc:
-        await websocket.send_json({"v": 1, "type": "error", "error": str(exc)})
+        await websocket.send_json(
+            {"v": AGENT_PROTOCOL_VERSION, "type": "error", "error": str(exc)}
+        )
         await websocket.close(code=4000, reason="认证失败")
     except WebSocketDisconnect:
         pass
@@ -92,4 +103,3 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
         if agent_id is not None:
             await hub.unregister(agent_id, websocket)
             db.touch_agent(agent_id)
-

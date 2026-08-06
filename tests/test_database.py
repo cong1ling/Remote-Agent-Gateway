@@ -10,6 +10,18 @@ from gateway.database import ConflictError, Database
 from gateway.security import hash_password, hash_token, issue_token, verify_password
 
 
+SHELL_DECLARATIONS = [
+    {
+        "id": "shell.v1",
+        "runtime": {
+            "os": "windows",
+            "dialect": "powershell",
+            "executable": "powershell.exe",
+        },
+    }
+]
+
+
 class DatabaseTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
@@ -50,7 +62,7 @@ class DatabaseTests(unittest.TestCase):
             credential.digest,
             "gpu-notebook",
             "模型训练环境",
-            ["shell.v1"],
+            SHELL_DECLARATIONS,
         )
         self.assertEqual(registered["user_id"], user["id"])
         self.assertIsNone(
@@ -61,7 +73,7 @@ class DatabaseTests(unittest.TestCase):
                 hash_token("another"),
                 "duplicate",
                 "",
-                ["shell.v1"],
+                SHELL_DECLARATIONS,
             )
         )
 
@@ -81,14 +93,39 @@ class DatabaseTests(unittest.TestCase):
             credential.digest,
             "private-agent",
             "",
-            ["shell.v1"],
+            SHELL_DECLARATIONS,
         )
 
-        self.assertIsNotNone(self.db.get_owned_agent(owner["id"], agent_id))
+        agent = self.db.get_owned_agent(owner["id"], agent_id)
+        self.assertIsNotNone(agent)
+        self.assertEqual(agent["profiles"], ["shell.v1"])
+        self.assertEqual(agent["profile_declarations"], SHELL_DECLARATIONS)
         self.assertIsNone(self.db.get_owned_agent(other["id"], agent_id))
         self.assertEqual(self.db.list_agents(other["id"]), [])
         self.assertTrue(self.db.revoke_agent(owner["id"], agent_id))
         self.assertEqual(self.db.list_agents(owner["id"]), [])
+
+    def test_legacy_profile_rows_are_not_treated_as_protocol_v2_capabilities(self) -> None:
+        user = self.create_user()
+        enrollment = issue_token("enroll")
+        self.db.create_enrollment_token(
+            user["id"], "legacy", enrollment.prefix, enrollment.digest, int(time.time()) + 60
+        )
+        credential = issue_token("agent")
+        agent_id = str(uuid.uuid4())
+        self.db.register_agent(
+            enrollment.digest,
+            agent_id,
+            credential.prefix,
+            credential.digest,
+            "legacy-agent",
+            "",
+            ["shell.v1"],  # type: ignore[arg-type]
+        )
+
+        agent = self.db.get_owned_agent(user["id"], agent_id)
+        self.assertEqual(agent["profiles"], [])
+        self.assertEqual(agent["profile_declarations"], [])
 
     def test_revoked_mcp_key_cannot_authenticate(self) -> None:
         user = self.create_user()

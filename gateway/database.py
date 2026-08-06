@@ -284,7 +284,7 @@ class Database:
         credential_hash: str,
         name: str,
         description: str,
-        profiles: list[str],
+        profile_declarations: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         now = int(time.time())
         with self.connect() as connection:
@@ -314,7 +314,7 @@ class Database:
                     enrollment["user_id"],
                     name,
                     description,
-                    json.dumps(profiles, separators=(",", ":")),
+                    json.dumps(profile_declarations, separators=(",", ":")),
                     credential_prefix,
                     credential_hash,
                     now,
@@ -340,8 +340,30 @@ class Database:
         if row is None:
             return None
         result = dict(row)
-        result["profiles"] = json.loads(result.pop("profiles_json"))
+        raw_declarations = json.loads(result.pop("profiles_json"))
+        declarations = (
+            [
+                declaration
+                for declaration in raw_declarations
+                if isinstance(declaration, dict)
+                and isinstance(declaration.get("id"), str)
+                and isinstance(declaration.get("runtime"), dict)
+            ]
+            if isinstance(raw_declarations, list)
+            else []
+        )
+        result["profile_declarations"] = declarations
+        result["profiles"] = [declaration["id"] for declaration in declarations]
         return result
+
+    def update_agent_profile_declarations(
+        self, agent_id: str, declarations: list[dict[str, Any]]
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE agents SET profiles_json = ? WHERE id = ? AND revoked_at IS NULL",
+                (json.dumps(declarations, separators=(",", ":")), agent_id),
+            )
 
     def touch_agent(self, agent_id: str) -> None:
         with self.connect() as connection:
