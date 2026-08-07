@@ -21,6 +21,7 @@ from .agent_protocol import (
 from .config import Settings
 from .database import Database
 from .profiles import (
+    profile_action_mcp_tool,
     describe_profile_declarations,
     profile_names,
     validate_profile_result,
@@ -67,6 +68,51 @@ def _agent_summary(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
     }
 
 
+def _owned_profile_action(
+    db: Database,
+    user_id: str,
+    agent_id: str,
+    profile_id: str,
+    action: str,
+    mcp_tool: str,
+) -> dict[str, Any]:
+    agent = db.get_owned_agent(user_id, agent_id)
+    if agent is None:
+        raise ToolError("Agent 不存在或不属于当前用户")
+    if profile_id not in agent["profiles"]:
+        raise ToolError(f"该 Agent 不支持 {profile_id}")
+    try:
+        declared_tool = profile_action_mcp_tool(profile_id, action)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    if declared_tool != mcp_tool:
+        raise ToolError(f"{profile_id}/{action} 未映射到 {mcp_tool}")
+    return agent
+
+
+async def _execute_profile_action(
+    *,
+    db: Database,
+    hub: AgentHub,
+    user_id: str,
+    agent_id: str,
+    profile_id: str,
+    action: str,
+    mcp_tool: str,
+    params: dict[str, Any],
+    timeout: float,
+) -> dict[str, Any]:
+    _owned_profile_action(db, user_id, agent_id, profile_id, action, mcp_tool)
+    try:
+        result = await hub.execute(agent_id, profile_id, action, params, timeout)
+    except (AgentOfflineError, AgentCommandError) as exc:
+        raise ToolError(str(exc)) from exc
+    try:
+        return validate_profile_result(profile_id, action, result)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+
+
 def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMCP:
     parsed = urlparse(settings.public_url)
     allowed_hosts = [parsed.netloc, "127.0.0.1:*", "localhost:*"]
@@ -77,7 +123,7 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             "管理并操作当前用户拥有的远程 Agent。先调用 list_agents 选择目标设备；"
             "调用任何 Agent 专属工具前，必须先对目标 agent_id 调用 get_agent_capabilities。"
             "只有能力详情中的 Profile Action 明确列出当前工具的 mcp_tool 时才能调用，"
-            "网关会在调用时再次校验。"
+            "网关会在调用时再次校验。workspace.v1 的 edit 必须先读取文件版本。"
         ),
         token_verifier=DatabaseTokenVerifier(db),
         auth=AuthSettings(
@@ -149,28 +195,117 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
     ) -> dict[str, Any]:
         del ctx
         user_id = _current_user_id()
-        agent = db.get_owned_agent(user_id, agent_id)
-        if agent is None:
-            raise ToolError("Agent 不存在或不属于当前用户")
-        if "shell.v1" not in agent["profiles"]:
-            raise ToolError("该 Agent 不支持远程 Shell")
         if not command.strip():
             raise ToolError("command 不能为空")
         if timeout < 1 or timeout > settings.max_command_timeout:
             raise ToolError(f"timeout 必须在 1 到 {settings.max_command_timeout} 秒之间")
-        try:
-            result = await hub.execute(
-                agent_id,
-                "shell.v1",
-                "exec",
-                {"command": command, "timeout": timeout},
-                timeout,
-            )
-        except (AgentOfflineError, AgentCommandError) as exc:
-            raise ToolError(str(exc)) from exc
-        try:
-            return validate_profile_result("shell.v1", "exec", result)
-        except ValueError as exc:
-            raise ToolError(str(exc)) from exc
+        return await _execute_profile_action(
+            db=db,
+            hub=hub,
+            user_id=user_id,
+            agent_id=agent_id,
+            profile_id="shell.v1",
+            action="exec",
+            mcp_tool="remote_exec",
+            params={"command": command, "timeout": timeout},
+            timeout=timeout,
+        )
+
+    @server.tool(
+        description=(
+            "读取指定在线 Agent 工作目录内的 UTF-8 文本文件。"
+            "调用前必须先对该 agent_id 调用 get_agent_capabilities；"
+            "只有 Agent 声明 workspace.v1 且 workspace.v1/read 的 mcp_tool 为 remote_read_file 时才能调用。"
+            "path 必须是工作目录下的相对路径，返回内容可能因行数或字节上限被截断，并包含 sha256。"
+        )
+    )
+    async def remote_read_file(
+        agent_id: str,
+        path: str,
+        ctx: Context,
+        offset: int = 1,
+        limit: int = 2000,
+    ) -> dict[str, Any]:
+        del ctx
+        user_id = _current_user_id()
+        return await _execute_profile_action(
+            db=db,
+            hub=hub,
+            user_id=user_id,
+            agent_id=agent_id,
+            profile_id="workspace.v1",
+            action="read",
+            mcp_tool="remote_read_file",
+            params={"path": path, "offset": offset, "limit": limit},
+            timeout=min(settings.max_command_timeout, 60),
+        )
+
+    @server.tool(
+        description=(
+            "在指定在线 Agent 工作目录内整体写入 UTF-8 文本文件。"
+            "调用前必须先对该 agent_id 调用 get_agent_capabilities；"
+            "只有 Agent 声明 workspace.v1 且 workspace.v1/write 的 mcp_tool 为 remote_write_file 时才能调用。"
+            "path 必须是工作目录下的相对路径；可用 expected_sha256 防止覆盖并发修改。"
+        )
+    )
+    async def remote_write_file(
+        agent_id: str,
+        path: str,
+        content: str,
+        ctx: Context,
+        expected_sha256: str | None = None,
+    ) -> dict[str, Any]:
+        del ctx
+        user_id = _current_user_id()
+        return await _execute_profile_action(
+            db=db,
+            hub=hub,
+            user_id=user_id,
+            agent_id=agent_id,
+            profile_id="workspace.v1",
+            action="write",
+            mcp_tool="remote_write_file",
+            params={
+                "path": path,
+                "content": content,
+                "expected_sha256": expected_sha256,
+            },
+            timeout=min(settings.max_command_timeout, 60),
+        )
+
+    @server.tool(
+        description=(
+            "在指定在线 Agent 工作目录内精确编辑 UTF-8 文本文件。"
+            "调用前必须先对该 agent_id 调用 get_agent_capabilities 和 remote_read_file；"
+            "只有 Agent 声明 workspace.v1 且 workspace.v1/edit 的 mcp_tool 为 remote_edit_file 时才能调用。"
+            "old_text 必须恰好匹配一次，expected_sha256 必须来自最近一次读取；冲突时不会覆盖文件。"
+        )
+    )
+    async def remote_edit_file(
+        agent_id: str,
+        path: str,
+        old_text: str,
+        new_text: str,
+        expected_sha256: str,
+        ctx: Context,
+    ) -> dict[str, Any]:
+        del ctx
+        user_id = _current_user_id()
+        return await _execute_profile_action(
+            db=db,
+            hub=hub,
+            user_id=user_id,
+            agent_id=agent_id,
+            profile_id="workspace.v1",
+            action="edit",
+            mcp_tool="remote_edit_file",
+            params={
+                "path": path,
+                "old_text": old_text,
+                "new_text": new_text,
+                "expected_sha256": expected_sha256,
+            },
+            timeout=min(settings.max_command_timeout, 60),
+        )
 
     return server

@@ -65,8 +65,8 @@ class RemoteAgentProfileTests(unittest.TestCase):
         self.assertEqual(
             hello["version"],
             {
-                "agent_version": "0.1.6",
-                "core_version": 4,
+                "agent_version": "0.2.0",
+                "core_version": 5,
                 "protocol_version": 2,
                 "build_id": "profile-test",
             },
@@ -109,6 +109,13 @@ class RemoteAgentProfileTests(unittest.TestCase):
         self.assertEqual(hello["credential"], config["credential"])
         self.assertNotIn("enrollment_token", hello)
         self.assertNotIn("REMOTE_AGENT_CONFIG_B64", environment)
+
+    def test_workspace_profile_is_composed_from_three_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            handlers = build_profile_handlers(["workspace.v1"], Path(directory))
+            handler = handlers["workspace.v1"]
+        self.assertEqual(set(handler.actions), {"read", "write", "edit"})
+        self.assertEqual(handler.declaration()["runtime"]["scope"], "workdir")
 
     def test_unknown_profile_cannot_be_declared_without_handler(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

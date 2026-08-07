@@ -28,18 +28,38 @@ class AgentBuilderTests(unittest.TestCase):
                 self.assertIn(f"{root}/run.py", names)
                 self.assertIn(f"{root}/remote_agent/core/runtime.py", names)
                 self.assertIn(f"{root}/remote_agent/core/version.py", names)
-                self.assertIn(f"{root}/remote_agent/profiles/shell_v1.py", names)
+                self.assertIn(f"{root}/remote_agent/profiles/registry.py", names)
+                self.assertIn(f"{root}/remote_agent/profiles/common/filesystem.py", names)
+                self.assertIn(f"{root}/remote_agent/profiles/shell_v1/__init__.py", names)
+                self.assertIn(f"{root}/remote_agent/profiles/shell_v1/actions/exec.py", names)
                 self.assertIn(f"{root}/.gitignore", names)
                 self.assertIn(f"{root}/github-actions.yml.example", names)
                 manifest = json.loads(
                     archive.read(f"{root}/remote_agent/manifest.json").decode("utf-8")
                 )
         self.assertEqual(manifest["profiles"], ["shell.v1"])
-        self.assertEqual(manifest["agent_version"], "0.1.6")
-        self.assertEqual(manifest["core_version"], 4)
+        self.assertEqual(manifest["agent_version"], "0.2.0")
+        self.assertEqual(manifest["core_version"], 5)
         self.assertEqual(manifest["build_id"], "12345678-1234-1234-1234-123456789012")
         self.assertEqual(manifest["agent"]["name"], "GPU Notebook")
         self.assertEqual(manifest["agent"]["description"], "模型训练环境")
+
+    def test_python_bundle_contains_workspace_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            builder = PythonAgentBuilder(Path(directory))
+            path, filename = builder.build(
+                bundle_id="12345678-1234-1234-1234-123456789012",
+                name="Workspace Agent",
+                description="文本工作区",
+                profiles=["workspace.v1"],
+            )
+            with zipfile.ZipFile(path) as archive:
+                names = archive.namelist()
+                root = filename.removesuffix(".zip")
+        self.assertIn(f"{root}/remote_agent/profiles/workspace_v1/profile.py", names)
+        self.assertIn(f"{root}/remote_agent/profiles/workspace_v1/actions/read.py", names)
+        self.assertIn(f"{root}/remote_agent/profiles/workspace_v1/actions/write.py", names)
+        self.assertIn(f"{root}/remote_agent/profiles/workspace_v1/actions/edit.py", names)
 
     def test_bundle_never_contains_enrollment_token(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

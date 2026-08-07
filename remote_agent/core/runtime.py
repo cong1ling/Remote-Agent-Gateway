@@ -194,7 +194,7 @@ class RemoteAgent:
                 raise FatalAgentError("网关返回了无效的握手响应")
 
             profile_summary = ", ".join(
-                f"{declaration['id']} [{declaration['runtime'].get('dialect', 'unknown')}]"
+                f"{declaration['id']} [{_runtime_label(declaration['runtime'])}]"
                 for declaration in self.profile_declarations
             )
             print(
@@ -246,3 +246,13 @@ class RemoteAgent:
                 self.request_profiles.clear()
             await asyncio.sleep(delay)
             delay = min(delay * 2, RECONNECT_MAX_SECONDS)
+
+
+def _runtime_label(runtime: dict[str, Any]) -> str:
+    return str(
+        runtime.get("dialect")
+        or runtime.get("scope")
+        or runtime.get("engine")
+        or runtime.get("language")
+        or "unknown"
+    )

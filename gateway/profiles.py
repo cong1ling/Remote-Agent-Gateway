@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
 SHELL_MAX_CAPTURE_BYTES = 2 * 1024 * 1024
 SHELL_TRUNCATION_MARKER = "\n[output truncated by remote agent]\n"
+WORKSPACE_MAX_FILE_BYTES = 8 * 1024 * 1024
+WORKSPACE_MAX_READ_LINES = 2000
+WORKSPACE_MAX_READ_BYTES = 50 * 1024
+WORKSPACE_MAX_WRITE_BYTES = 2 * 1024 * 1024
 
 PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "shell.v1": {
@@ -19,7 +24,7 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
         "status": "stable",
         "implementations": {
             "python": {
-                "source": "shell_v1.py",
+                "source": "shell_v1",
                 "minimum_python": "3.11",
             }
         },
@@ -122,6 +127,167 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
             "timeout_terminates_process_tree": True,
             "max_concurrent_requests_per_agent": MAX_CONCURRENT_REQUESTS_PER_AGENT,
         },
+    },
+    "workspace.v1": {
+        "id": "workspace.v1",
+        "name": "远程工作区",
+        "description": (
+            "在 Agent 启动时指定的工作目录内，以 UTF-8 文本契约读取、整体写入和精确编辑文件。"
+        ),
+        "status": "stable",
+        "implementations": {
+            "python": {
+                "source": "workspace_v1",
+                "minimum_python": "3.11",
+            }
+        },
+        "actions": [
+            {
+                "name": "read",
+                "mcp_tool": "remote_read_file",
+                "description": "读取工作目录内的 UTF-8 文本文件，可按行分段。",
+                "parameters": [
+                    {
+                        "name": "path",
+                        "type": "string",
+                        "required": True,
+                        "description": "工作目录下的相对路径，使用 / 分隔。",
+                    },
+                    {
+                        "name": "offset",
+                        "type": "integer",
+                        "required": False,
+                        "default": 1,
+                        "minimum": 1,
+                        "description": "从 1 开始的起始行号。",
+                    },
+                    {
+                        "name": "limit",
+                        "type": "integer",
+                        "required": False,
+                        "default": WORKSPACE_MAX_READ_LINES,
+                        "minimum": 1,
+                        "maximum": WORKSPACE_MAX_READ_LINES,
+                        "description": "最多读取的行数，超出时返回 truncated。",
+                    },
+                ],
+                "returns": [
+                    {"name": "path", "type": "string", "description": "规范化后的工作区相对路径。"},
+                    {"name": "content", "type": "string", "description": "读取到的 UTF-8 文本。"},
+                    {"name": "offset", "type": "integer", "description": "实际起始行号。"},
+                    {"name": "lines", "type": "integer", "description": "本次返回的行数。"},
+                    {"name": "total_lines", "type": "integer", "description": "文件总行数。"},
+                    {"name": "truncated", "type": "boolean", "description": "是否因范围或输出上限未返回完整内容。"},
+                    {"name": "size", "type": "integer", "description": "文件 UTF-8 字节数。"},
+                    {"name": "sha256", "type": "string", "description": "整个文件内容的 SHA-256，用于后续编辑冲突检测。"},
+                ],
+                "errors": [
+                    {"name": "invalid_path", "description": "path 不是工作目录下的相对路径。"},
+                    {"name": "not_found", "description": "目标文件不存在。"},
+                    {"name": "invalid_encoding", "description": "文件不是有效的 UTF-8 文本。"},
+                    {"name": "too_large", "description": "文件或读取范围超过协议限制。"},
+                ],
+            },
+            {
+                "name": "write",
+                "mcp_tool": "remote_write_file",
+                "description": "在工作目录内原子地整体创建或覆盖 UTF-8 文本文件。",
+                "parameters": [
+                    {
+                        "name": "path",
+                        "type": "string",
+                        "required": True,
+                        "description": "工作目录下的相对路径，使用 / 分隔。",
+                    },
+                    {
+                        "name": "content",
+                        "type": "string",
+                        "required": True,
+                        "description": "要写入的 UTF-8 文本；写入会整体替换文件。",
+                    },
+                    {
+                        "name": "expected_sha256",
+                        "type": "string",
+                        "required": False,
+                        "description": "可选的当前文件版本；不匹配时拒绝覆盖。",
+                    },
+                ],
+                "returns": [
+                    {"name": "path", "type": "string", "description": "规范化后的工作区相对路径。"},
+                    {"name": "bytes_written", "type": "integer", "description": "写入的 UTF-8 字节数。"},
+                    {"name": "sha256", "type": "string", "description": "写入后整个文件内容的 SHA-256。"},
+                    {"name": "changed", "type": "boolean", "description": "文件内容是否实际发生变化。"},
+                ],
+                "errors": [
+                    {"name": "invalid_path", "description": "path 不是工作目录下的相对路径。"},
+                    {"name": "permission_denied", "description": "目标或父目录不可写。"},
+                    {"name": "conflict", "description": "expected_sha256 与当前文件版本不一致。"},
+                    {"name": "too_large", "description": "写入内容超过协议限制。"},
+                ],
+            },
+            {
+                "name": "edit",
+                "mcp_tool": "remote_edit_file",
+                "description": "按当前文件版本在工作目录内精确替换唯一一处文本，并返回 diff。",
+                "parameters": [
+                    {
+                        "name": "path",
+                        "type": "string",
+                        "required": True,
+                        "description": "工作目录下的相对路径，使用 / 分隔。",
+                    },
+                    {
+                        "name": "old_text",
+                        "type": "string",
+                        "required": True,
+                        "description": "必须在文件中恰好匹配一次的原文本。",
+                    },
+                    {
+                        "name": "new_text",
+                        "type": "string",
+                        "required": True,
+                        "description": "替换后的文本。",
+                    },
+                    {
+                        "name": "expected_sha256",
+                        "type": "string",
+                        "required": True,
+                        "description": "调用 read 得到的当前文件版本；不匹配时拒绝修改。",
+                    },
+                ],
+                "returns": [
+                    {"name": "path", "type": "string", "description": "规范化后的工作区相对路径。"},
+                    {"name": "changed", "type": "boolean", "description": "文件内容是否发生变化。"},
+                    {"name": "diff", "type": "string", "description": "修改前后的 unified diff。"},
+                    {"name": "first_changed_line", "type": "integer", "description": "首个修改行号。"},
+                    {"name": "sha256", "type": "string", "description": "修改后整个文件内容的 SHA-256。"},
+                ],
+                "errors": [
+                    {"name": "invalid_path", "description": "path 不是工作目录下的相对路径。"},
+                    {"name": "conflict", "description": "文件版本已变化，拒绝覆盖新内容。"},
+                    {"name": "not_found", "description": "old_text 未找到或文件不存在。"},
+                    {"name": "ambiguous_match", "description": "old_text 匹配了多处内容，拒绝修改。"},
+                    {"name": "invalid_encoding", "description": "文件不是有效的 UTF-8 文本。"},
+                ],
+            },
+        ],
+        "runtime_contract": {
+            "selection": "Agent 启动时固定一个工作目录；所有 Action 只能访问该目录下的相对路径。",
+            "fields": [
+                {"name": "scope", "type": "string", "description": "固定为 workdir，不暴露绝对路径。"},
+                {"name": "path_format", "type": "string", "description": "固定使用 relative-posix 路径。"},
+                {"name": "encoding", "type": "string", "description": "固定使用 UTF-8 文本。"},
+                {"name": "max_file_bytes", "type": "integer", "description": "单文件最大字节数。"},
+            ],
+        },
+        "limits": {
+            "max_file_bytes": WORKSPACE_MAX_FILE_BYTES,
+            "max_read_lines": WORKSPACE_MAX_READ_LINES,
+            "max_read_bytes": WORKSPACE_MAX_READ_BYTES,
+            "max_write_bytes": WORKSPACE_MAX_WRITE_BYTES,
+            "atomic_write": True,
+            "optimistic_concurrency": True,
+        },
     }
 }
 
@@ -162,6 +328,8 @@ def validate_profile_declarations(value: object) -> list[dict[str, Any]]:
         runtime = declaration.get("runtime")
         if profile_id == "shell.v1":
             runtime = _validate_shell_runtime(runtime)
+        elif profile_id == "workspace.v1":
+            runtime = _validate_workspace_runtime(runtime)
         elif not isinstance(runtime, dict):
             raise ValueError(f"Profile {profile_id} 缺少 runtime 声明")
         normalized.append({"id": profile_id, "runtime": runtime})
@@ -194,6 +362,25 @@ def _validate_shell_runtime(value: object) -> dict[str, str]:
         "os": operating_system,
         "dialect": dialect,
         "executable": executable.strip(),
+    }
+
+
+def _validate_workspace_runtime(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("workspace.v1 必须声明工作区运行时")
+    if value.get("scope") != "workdir":
+        raise ValueError("workspace.v1 runtime.scope 必须是 workdir")
+    if value.get("path_format") != "relative-posix":
+        raise ValueError("workspace.v1 runtime.path_format 必须是 relative-posix")
+    if value.get("encoding") != "utf-8":
+        raise ValueError("workspace.v1 runtime.encoding 必须是 utf-8")
+    if value.get("max_file_bytes") != WORKSPACE_MAX_FILE_BYTES:
+        raise ValueError("workspace.v1 runtime.max_file_bytes 与协议限制不一致")
+    return {
+        "scope": "workdir",
+        "path_format": "relative-posix",
+        "encoding": "utf-8",
+        "max_file_bytes": WORKSPACE_MAX_FILE_BYTES,
     }
 
 
@@ -250,9 +437,24 @@ def profile_mcp_tools() -> set[str]:
     }
 
 
+def profile_action_mcp_tool(profile_id: str, action: str) -> str:
+    definition = PROFILE_REGISTRY.get(profile_id)
+    if definition is None:
+        raise ValueError(f"不支持的 Profile: {profile_id}")
+    for action_definition in definition.get("actions", []):
+        if action_definition.get("name") == action:
+            tool = action_definition.get("mcp_tool")
+            if isinstance(tool, str) and tool:
+                return tool
+            break
+    raise ValueError(f"Profile {profile_id} 不支持操作: {action}")
+
+
 def validate_profile_result(
     profile_id: str, action: str, result: dict[str, Any]
 ) -> dict[str, Any]:
+    if profile_id == "workspace.v1":
+        return _validate_workspace_result(action, result)
     if profile_id != "shell.v1" or action != "exec":
         raise ValueError(f"不支持的 Profile 操作: {profile_id}/{action}")
     stdout = result.get("stdout")
@@ -267,3 +469,102 @@ def validate_profile_result(
     if len(stdout.encode("utf-8")) > maximum or len(stderr.encode("utf-8")) > maximum:
         raise ValueError("Agent 返回的 Shell 输出超过协议限制")
     return {"stdout": stdout, "stderr": stderr, "exit_code": exit_code}
+
+
+def _validate_workspace_result(action: str, result: dict[str, Any]) -> dict[str, Any]:
+    path = result.get("path")
+    sha256 = result.get("sha256")
+    path_object = PurePosixPath(path) if isinstance(path, str) else None
+    windows_path = PureWindowsPath(path) if isinstance(path, str) else None
+    if (
+        not isinstance(path, str)
+        or not path
+        or path_object is None
+        or path_object.is_absolute()
+        or windows_path is None
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or ".." in path_object.parts
+    ):
+        raise ValueError("Agent 返回的 workspace path 无效")
+    if (
+        not isinstance(sha256, str)
+        or len(sha256) != 64
+        or any(character not in "0123456789abcdefABCDEF" for character in sha256)
+    ):
+        raise ValueError("Agent 返回的 workspace sha256 无效")
+    if action == "read":
+        content = result.get("content")
+        offset = result.get("offset")
+        lines = result.get("lines")
+        total_lines = result.get("total_lines")
+        truncated = result.get("truncated")
+        size = result.get("size")
+        if not isinstance(content, str):
+            raise ValueError("Agent 返回的 workspace content 必须是字符串")
+        if len(content.encode("utf-8")) > WORKSPACE_MAX_READ_BYTES:
+            raise ValueError("Agent 返回的 workspace content 超过限制")
+        if (
+            not isinstance(offset, int)
+            or isinstance(offset, bool)
+            or offset < 1
+            or not isinstance(lines, int)
+            or isinstance(lines, bool)
+            or lines < 0
+            or not isinstance(total_lines, int)
+            or isinstance(total_lines, bool)
+            or total_lines < 0
+            or not isinstance(truncated, bool)
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+        ):
+            raise ValueError("Agent 返回的 workspace read 字段无效")
+        return {
+            "path": path,
+            "content": content,
+            "offset": offset,
+            "lines": lines,
+            "total_lines": total_lines,
+            "truncated": truncated,
+            "size": size,
+            "sha256": sha256.lower(),
+        }
+    if action == "write":
+        bytes_written = result.get("bytes_written")
+        changed = result.get("changed")
+        if (
+            not isinstance(bytes_written, int)
+            or isinstance(bytes_written, bool)
+            or bytes_written < 0
+            or bytes_written > WORKSPACE_MAX_WRITE_BYTES
+            or not isinstance(changed, bool)
+        ):
+            raise ValueError("Agent 返回的 workspace write 字段无效")
+        return {
+            "path": path,
+            "bytes_written": bytes_written,
+            "sha256": sha256.lower(),
+            "changed": changed,
+        }
+    if action == "edit":
+        changed = result.get("changed")
+        diff = result.get("diff")
+        first_changed_line = result.get("first_changed_line")
+        if (
+            not isinstance(changed, bool)
+            or not isinstance(diff, str)
+            or len(diff.encode("utf-8")) > WORKSPACE_MAX_WRITE_BYTES
+            or not isinstance(first_changed_line, int)
+            or isinstance(first_changed_line, bool)
+            or first_changed_line < 1
+        ):
+            raise ValueError("Agent 返回的 workspace edit 字段无效")
+        return {
+            "path": path,
+            "changed": changed,
+            "diff": diff,
+            "first_changed_line": first_changed_line,
+            "sha256": sha256.lower(),
+        }
+    raise ValueError(f"不支持的 workspace.v1 操作: {action}")

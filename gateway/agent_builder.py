@@ -153,13 +153,15 @@ class PythonAgentBuilder:
                     self._write_file(archive, source, archive_root)
                 self._write_file(archive, self.package_root / "profiles" / "__init__.py", archive_root)
                 self._write_file(archive, self.package_root / "profiles" / "base.py", archive_root)
+                self._write_file(archive, self.package_root / "profiles" / "registry.py", archive_root)
+                self._write_tree(archive, self.package_root / "profiles" / "common", archive_root)
                 for profile_id in selected:
                     source_name = PROFILE_REGISTRY[profile_id]["implementations"][self.runtime]["source"]
-                    self._write_file(
-                        archive,
-                        self.package_root / "profiles" / source_name,
-                        archive_root,
-                    )
+                    source = self.package_root / "profiles" / source_name
+                    if source.is_dir():
+                        self._write_tree(archive, source, archive_root)
+                    else:
+                        self._write_file(archive, source, archive_root)
             os.replace(temporary, destination)
         except OSError as exc:
             if temporary.exists():
@@ -172,6 +174,13 @@ class PythonAgentBuilder:
             raise AgentBuildError(f"Agent 源文件不存在: {source.name}")
         relative = source.relative_to(self.package_root)
         archive.write(source, f"{archive_root}/remote_agent/{relative.as_posix()}")
+
+    def _write_tree(self, archive: zipfile.ZipFile, source: Path, archive_root: str) -> None:
+        if not source.is_dir():
+            raise AgentBuildError(f"Agent 源目录不存在: {source.name}")
+        for child in sorted(source.rglob("*")):
+            if child.is_file():
+                self._write_file(archive, child, archive_root)
 
 
 def new_bundle_id() -> str:

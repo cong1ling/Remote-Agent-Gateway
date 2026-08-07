@@ -91,12 +91,24 @@ class McpApiTests(unittest.TestCase):
         self.assertEqual(listed.status_code, 200, listed.text)
         listed_tools = listed.json()["result"]["tools"]
         names = [tool["name"] for tool in listed_tools]
-        self.assertEqual(names, ["list_agents", "get_agent_capabilities", "remote_exec"])
+        self.assertEqual(
+            names,
+            [
+                "list_agents",
+                "get_agent_capabilities",
+                "remote_exec",
+                "remote_read_file",
+                "remote_write_file",
+                "remote_edit_file",
+            ],
+        )
         descriptions = {tool["name"]: tool["description"] for tool in listed_tools}
         self.assertIn("get_agent_capabilities", descriptions["remote_exec"])
         self.assertIn("shell.v1", descriptions["remote_exec"])
         self.assertIn("mcp_tool", descriptions["remote_exec"])
         self.assertIn("必须先调用", descriptions["get_agent_capabilities"])
+        self.assertIn("workspace.v1", descriptions["remote_read_file"])
+        self.assertIn("expected_sha256", descriptions["remote_edit_file"])
         mappings = [
             action.get("mcp_tool")
             for profile in public_profile_catalog()

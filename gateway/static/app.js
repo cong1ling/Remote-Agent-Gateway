@@ -118,12 +118,18 @@ function openProfileDialog(profileId) {
     limits.truncation_marker ? `截断标记：${limits.truncation_marker}` : "",
     limits.timeout_terminates_process_tree ? "超时、取消或断线会终止本次命令的整个进程树" : "",
     limits.max_concurrent_requests_per_agent ? `同一 Agent 最多同时执行 ${limits.max_concurrent_requests_per_agent} 个请求` : "",
+    limits.max_file_bytes ? `单文件最多 ${formatBytes(limits.max_file_bytes)}` : "",
+    limits.max_read_bytes ? `单次读取输出最多 ${formatBytes(limits.max_read_bytes)}` : "",
+    limits.max_write_bytes ? `单次写入最多 ${formatBytes(limits.max_write_bytes)}` : "",
+    limits.atomic_write ? "写入使用原子替换" : "",
+    limits.optimistic_concurrency ? "编辑使用版本冲突检测" : "",
   ].filter(Boolean);
+  const runtimeTitle = profile.id === "shell.v1" ? "Shell 方言声明" : "运行时声明";
   $("#profile-dialog-eyebrow").textContent = `${profile.id} · ${profile.status === "stable" ? "稳定" : profile.status}`;
   $("#profile-dialog-title").textContent = `${profile.name} 协议`;
   $("#profile-dialog-body").innerHTML = `
     <section class="protocol-lead"><p>${escapeHtml(profile.description)}</p><div>${(profile.runtimes || []).map((item) => `<span>${escapeHtml(item)} 实现</span>`).join("")}</div></section>
-    <section class="protocol-section"><div class="protocol-section-head"><div><span>Runtime</span><h3>Shell 方言声明</h3></div><p>${escapeHtml(runtime.selection || "Agent 必须声明具体运行时。")}</p></div><div class="schema-list">${runtimeFields}</div><div class="dialect-grid">${dialects}</div></section>
+    <section class="protocol-section"><div class="protocol-section-head"><div><span>Runtime</span><h3>${runtimeTitle}</h3></div><p>${escapeHtml(runtime.selection || "Agent 必须声明具体运行时。")}</p></div><div class="schema-list">${runtimeFields}</div><div class="dialect-grid">${dialects}</div></section>
     ${actions}
     <section class="protocol-section"><div class="protocol-section-head"><div><span>Limits</span><h3>执行限制</h3></div></div><ul class="limit-list">${limitItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>`;
   $("#profile-dialog").showModal();
@@ -137,6 +143,7 @@ function profileRuntimeLabel(declaration) {
   const labels = [
     osLabels[runtime.os] || runtime.os,
     dialectLabels[runtime.dialect] || runtime.dialect || runtime.engine || runtime.language,
+    runtime.scope === "workdir" ? "工作目录" : runtime.scope,
   ].filter(Boolean);
   return [...new Set(labels)].join(" · ");
 }

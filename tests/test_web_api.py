@@ -241,7 +241,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(download.status_code, 200, download.text)
         self.assertEqual(download.headers["content-type"], "application/zip")
         with zipfile.ZipFile(BytesIO(download.content)) as archive:
-            self.assertTrue(any(name.endswith("/remote_agent/profiles/shell_v1.py") for name in archive.namelist()))
+            self.assertTrue(any(name.endswith("/remote_agent/profiles/shell_v1/profile.py") for name in archive.namelist()))
             combined = b"\n".join(archive.read(name) for name in archive.namelist())
         self.assertNotIn(payload["secret"].encode(), combined)
 

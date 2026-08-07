@@ -55,6 +55,47 @@ class ProfileContractTests(unittest.TestCase):
                 {"stdout": "ok", "stderr": "", "exit_code": "0"},
             )
 
+    def test_workspace_declaration_and_results_match_contract(self) -> None:
+        declarations = validate_profile_declarations(
+            [
+                {
+                    "id": "workspace.v1",
+                    "runtime": {
+                        "scope": "workdir",
+                        "path_format": "relative-posix",
+                        "encoding": "utf-8",
+                        "max_file_bytes": 8 * 1024 * 1024,
+                    },
+                }
+            ]
+        )
+        self.assertEqual(declarations[0]["runtime"]["scope"], "workdir")
+        result = validate_profile_result(
+            "workspace.v1",
+            "write",
+            {
+                "path": "demo.txt",
+                "bytes_written": 2,
+                "sha256": "a" * 64,
+                "changed": True,
+            },
+        )
+        self.assertEqual(result["bytes_written"], 2)
+        with self.assertRaisesRegex(ValueError, "scope"):
+            validate_profile_declarations(
+                [
+                    {
+                        "id": "workspace.v1",
+                        "runtime": {
+                            "scope": "filesystem",
+                            "path_format": "relative-posix",
+                            "encoding": "utf-8",
+                            "max_file_bytes": 8 * 1024 * 1024,
+                        },
+                    }
+                ]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
