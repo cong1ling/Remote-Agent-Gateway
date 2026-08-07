@@ -148,14 +148,36 @@ function profileRuntimeLabel(declaration) {
   return [...new Set(labels)].join(" · ");
 }
 
-function agentProfileBadges(agent) {
+function agentProfileIds(agent) {
+  const declarations = agent.profile_declarations || [];
+  return (agent.profiles || []).length
+    ? agent.profiles
+    : declarations.map((declaration) => declaration.id);
+}
+
+function agentCapabilitiesButton(agent) {
+  const count = agentProfileIds(agent).length;
+  return `<button class="capability-summary" data-agent-capabilities="${escapeHtml(agent.id)}" type="button" aria-label="查看 ${escapeHtml(agent.name)} 的能力">${count} 个能力</button>`;
+}
+
+function openAgentCapabilitiesDialog(agentId) {
+  const agent = state.agents.find((item) => item.id === agentId);
+  if (!agent) return;
   const declarations = agent.profile_declarations || [];
   const declarationsById = new Map(declarations.map((declaration) => [declaration.id, declaration]));
-  const profileIds = (agent.profiles || []).length ? agent.profiles : declarations.map((declaration) => declaration.id);
-  return profileIds.map((profileId) => {
+  const items = agentProfileIds(agent).map((profileId) => {
+    const profile = state.catalog.find((item) => item.id === profileId);
     const runtime = profileRuntimeLabel(declarationsById.get(profileId));
-    return `<span class="profile${runtime ? " profile-runtime" : ""}"><span>${escapeHtml(profileId)}</span>${runtime ? `<small>${escapeHtml(runtime)}</small>` : ""}</span>`;
+    const actions = (profile?.actions || []).map((action) => `<span><code>${escapeHtml(action.name)}</code>${action.mcp_tool ? ` <small>→</small> <code>${escapeHtml(action.mcp_tool)}</code>` : ""}</span>`).join("");
+    return `<article class="agent-capability-item">
+      <header><div><h3>${escapeHtml(profile?.name || profileId)}</h3><code>${escapeHtml(profileId)}</code></div>${profile ? `<button class="secondary" data-profile-details="${escapeHtml(profileId)}" type="button">查看协议</button>` : ""}</header>
+      <p>${escapeHtml(runtime || "未声明运行时详情")}</p>
+      <div class="agent-capability-actions">${actions || "<span>暂无 Action 映射</span>"}</div>
+    </article>`;
   }).join("");
+  $("#agent-capabilities-title").textContent = agent.name;
+  $("#agent-capabilities-body").innerHTML = items || emptyState("没有可用能力", "该 Agent 尚未声明标准 Profile");
+  $("#agent-capabilities-dialog").showModal();
 }
 
 function agentVersionView(agent) {
@@ -178,12 +200,12 @@ function agentVersionView(agent) {
 }
 
 function agentCard(agent) {
-  const profiles = agentProfileBadges(agent);
+  const capabilities = agentCapabilitiesButton(agent);
   const upgrade = agent.requires_reenrollment ? '<span class="upgrade-badge">需重新注册</span>' : "";
   const version = agentVersionView(agent);
   return `<article class="agent-card">
     <div class="agent-title"><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.description || "暂无用途描述")}</p><small>${escapeHtml(version.text)}</small></div>
-    <div class="agent-meta"><span class="status ${agent.online ? "online" : ""}">${agent.online ? "在线" : "离线"}</span><span class="version-badge ${escapeHtml(version.status)}">${escapeHtml(version.label)}</span>${upgrade}${profiles}<span>${formatTime(agent.last_seen_at)}</span></div>
+    <div class="agent-meta"><span class="status ${agent.online ? "online" : ""}">${agent.online ? "在线" : "离线"}</span><span class="version-badge ${escapeHtml(version.status)}">${escapeHtml(version.label)}</span>${upgrade}${capabilities}<span>${formatTime(agent.last_seen_at)}</span></div>
     <div class="row-actions"><button class="secondary" data-edit-agent="${agent.id}">编辑</button><button class="danger" data-revoke-agent="${agent.id}">撤销</button></div>
   </article>`;
 }
@@ -368,6 +390,8 @@ function bindEvents() {
     finally { button.disabled = false; }
   };
   $("#secret-close").onclick = () => $("#secret-dialog").close();
+  $("#agent-capabilities-close").onclick = () => $("#agent-capabilities-dialog").close();
+  $("#agent-capabilities-done").onclick = () => $("#agent-capabilities-dialog").close();
   $("#profile-dialog-close").onclick = () => $("#profile-dialog").close();
   $("#profile-dialog-done").onclick = () => $("#profile-dialog").close();
   $("#copy-secret").onclick = () => copyText($("#secret-value").value, "Secret 已复制");
@@ -375,7 +399,13 @@ function bindEvents() {
   $(".copy-endpoint").onclick = () => copyText(state.mcpUrl, "MCP Endpoint 已复制");
   document.body.onclick = async (event) => {
     const target = event.target;
-    if (target.dataset.profileDetails) openProfileDialog(target.dataset.profileDetails);
+    const capabilitiesButton = target.closest("[data-agent-capabilities]");
+    if (capabilitiesButton) openAgentCapabilitiesDialog(capabilitiesButton.dataset.agentCapabilities);
+    const profileButton = target.closest("[data-profile-details]");
+    if (profileButton) {
+      if ($("#agent-capabilities-dialog").open) $("#agent-capabilities-dialog").close();
+      openProfileDialog(profileButton.dataset.profileDetails);
+    }
     const agentId = target.dataset.editAgent;
     if (agentId) {
       const agent = state.agents.find((item) => item.id === agentId);
