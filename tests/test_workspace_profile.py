@@ -18,7 +18,11 @@ class WorkspaceProfileTests(unittest.IsolatedAsyncioTestCase):
             written = await profile.execute(
                 "write",
                 "write-1",
-                {"path": "src/demo.txt", "content": "one\ntwo\n"},
+                {
+                    "path": "src/demo.txt",
+                    "content": "one\ntwo\n",
+                    "expected_sha256": None,
+                },
             )
             self.assertTrue(written["changed"])
             read = await profile.execute(
@@ -47,7 +51,13 @@ class WorkspaceProfileTests(unittest.IsolatedAsyncioTestCase):
             root = Path(directory)
             profile = WorkspaceV1Profile(ProfileContext(root))
             await profile.execute(
-                "write", "write-1", {"path": "demo.txt", "content": "same\nsame\n"}
+                "write",
+                "write-1",
+                {
+                    "path": "demo.txt",
+                    "content": "same\nsame\n",
+                    "expected_sha256": None,
+                },
             )
             current = await profile.execute("read", "read-1", {"path": "demo.txt"})
             with self.assertRaisesRegex(WorkspaceError, "conflict"):
@@ -72,6 +82,50 @@ class WorkspaceProfileTests(unittest.IsolatedAsyncioTestCase):
                         "expected_sha256": current["sha256"],
                     },
                 )
+
+    async def test_write_requires_explicit_create_or_matching_version(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile = WorkspaceV1Profile(ProfileContext(root))
+            with self.assertRaisesRegex(WorkspaceError, "invalid_params"):
+                await profile.execute(
+                    "write", "write-missing", {"path": "demo.txt", "content": "one\n"}
+                )
+
+            created = await profile.execute(
+                "write",
+                "write-create",
+                {"path": "demo.txt", "content": "one\n", "expected_sha256": None},
+            )
+            with self.assertRaisesRegex(WorkspaceError, "conflict"):
+                await profile.execute(
+                    "write",
+                    "write-create-again",
+                    {"path": "demo.txt", "content": "lost\n", "expected_sha256": None},
+                )
+            self.assertEqual((root / "demo.txt").read_text(encoding="utf-8"), "one\n")
+
+            replaced = await profile.execute(
+                "write",
+                "write-replace",
+                {
+                    "path": "demo.txt",
+                    "content": "two\n",
+                    "expected_sha256": created["sha256"],
+                },
+            )
+            self.assertTrue(replaced["changed"])
+            with self.assertRaisesRegex(WorkspaceError, "conflict"):
+                await profile.execute(
+                    "write",
+                    "write-stale",
+                    {
+                        "path": "demo.txt",
+                        "content": "three\n",
+                        "expected_sha256": created["sha256"],
+                    },
+                )
+            self.assertEqual((root / "demo.txt").read_text(encoding="utf-8"), "two\n")
 
     async def test_read_preserves_bom_and_line_range(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

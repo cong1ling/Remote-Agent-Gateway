@@ -103,12 +103,20 @@ class McpApiTests(unittest.TestCase):
             ],
         )
         descriptions = {tool["name"]: tool["description"] for tool in listed_tools}
+        schemas = {tool["name"]: tool["inputSchema"] for tool in listed_tools}
         self.assertIn("get_agent_capabilities", descriptions["remote_exec"])
         self.assertIn("shell.v1", descriptions["remote_exec"])
         self.assertIn("mcp_tool", descriptions["remote_exec"])
         self.assertIn("必须先调用", descriptions["get_agent_capabilities"])
         self.assertIn("workspace.v1", descriptions["remote_read_file"])
         self.assertIn("expected_sha256", descriptions["remote_edit_file"])
+        write_schema = schemas["remote_write_file"]
+        self.assertIn("expected_sha256", write_schema["required"])
+        expected_schema = write_schema["properties"]["expected_sha256"]
+        self.assertEqual(
+            {item.get("type") for item in expected_schema["anyOf"]},
+            {"string", "null"},
+        )
         mappings = [
             action.get("mcp_tool")
             for profile in public_profile_catalog()

@@ -47,18 +47,25 @@ class WriteAction(ActionHandler):
             raise WorkspaceError("invalid_encoding", "content 不是有效的 UTF-8 文本") from exc
         if len(encoded) > MAX_WRITE_BYTES:
             raise WorkspaceError("too_large", f"content 超过 {MAX_WRITE_BYTES} bytes 限制")
-        expected = validate_expected_sha256(params.get("expected_sha256"))
+        if "expected_sha256" not in params:
+            raise WorkspaceError(
+                "invalid_params",
+                "write 必须显式提供 expected_sha256；新建文件时传 null",
+            )
+        expected = validate_expected_sha256(params["expected_sha256"])
         current: bytes | None = None
         if path.exists():
             if not path.is_file():
                 raise WorkspaceError("invalid_path", f"目标不是文件: {display_path}")
+            if expected is None:
+                raise WorkspaceError("conflict", "目标文件已存在，不能按新建模式写入")
             try:
                 current = path.read_bytes()
             except PermissionError as exc:
                 raise WorkspaceError("permission_denied", f"无法读取文件: {display_path}") from exc
             except OSError as exc:
                 raise WorkspaceError("read_failed", f"读取文件失败: {display_path}") from exc
-            if expected is not None and hashlib.sha256(current).hexdigest() != expected:
+            if hashlib.sha256(current).hexdigest() != expected:
                 raise WorkspaceError("conflict", "文件版本已变化，请重新读取后再写入")
         elif expected is not None:
             raise WorkspaceError("conflict", "目标文件不存在，无法匹配 expected_sha256")

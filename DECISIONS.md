@@ -205,3 +205,11 @@
 - **替代方案**：继续在 Profile 的 `execute` 中按字符串分支；使用动态 import、`pip entry_points` 或用户插件；仅依赖 Shell 读写；实现完整上传下载、分布式锁或网关文件缓存；为 Workspace 使用独立于 Shell 的第二个根目录。
 - **取舍**：新增了明确的 Profile package、Action 模块和结果契约，并要求 edit 先 read 获取版本；换取稳定的扩展结构、跨平台文本语义和可发现的网络冲突。Workspace 路径限制在同时存在 `shell.v1` 时不是系统安全沙箱，真正隔离仍依赖 OS 用户、容器或沙箱。
 - **影响**：MCP 固定工具增加 `remote_read_file`、`remote_write_file`、`remote_edit_file`；工作台可组装 Shell、Workspace 或二者组合的 Python Agent；首版不支持图片、二进制、上传下载、Action 子集、动态插件或恰好执行一次语义。未来 Profile 与 Action 的扩展方式以 `PROFILE_DEVELOPMENT.md` 为准。
+
+## 2026-08-07：Workspace 整体写入采用显式安全前置条件
+
+- **决策**：`workspace.v1/write` 的 `expected_sha256` 改为必填且允许为 `null`。显式传 `null` 表示只创建不存在的文件，目标已存在时返回冲突；传 SHA-256 表示只覆盖内容版本完全匹配的现有文件。缺少字段、目标存在性不符或版本不符均拒绝写入，不提供无条件强制覆盖模式。
+- **原因**：原契约把 `expected_sha256` 设为可选，使未先读取文件的 AI 可以凭猜测整体覆盖已有内容。原子替换只能防止半写，无法阻止完整但错误的覆盖；安全默认值必须让创建与替换意图可区分并由远端独立执行。
+- **替代方案**：保持可选 SHA 并只加强工具描述；增加 `force/new/version` 三种模式；把 `write` 拆成创建和替换两个 Action；禁止整体替换已有文件；依赖 Shell 或 Git 回滚。
+- **取舍**：创建文件时也必须显式传 `null`，旧客户端和 Agent 需要升级；换取遗漏参数时安全失败，并防止模型把版本冲突自动降级成无条件覆盖。需要替换变化后的文件时必须重新读取并提交最新 SHA。
+- **影响**：MCP `remote_write_file` Schema、网关 Profile 契约和官方 Python Handler 同步变更，Agent 与项目补丁版本升级为 0.2.1，Core v5 和 WebSocket v2 不变。工作台重新组装的 Agent 自动获得新语义；现有 0.2.0 Workspace Agent 显示需要升级。

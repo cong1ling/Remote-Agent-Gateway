@@ -191,7 +191,7 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
             {
                 "name": "write",
                 "mcp_tool": "remote_write_file",
-                "description": "在工作目录内原子地整体创建或覆盖 UTF-8 文本文件。",
+                "description": "按显式文件版本前置条件，原子地创建或整体覆盖 UTF-8 文本文件。",
                 "parameters": [
                     {
                         "name": "path",
@@ -208,8 +208,9 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
                     {
                         "name": "expected_sha256",
                         "type": "string",
-                        "required": False,
-                        "description": "可选的当前文件版本；不匹配时拒绝覆盖。",
+                        "required": True,
+                        "nullable": True,
+                        "description": "传 null 时只允许新建；传当前文件 SHA-256 时只允许覆盖该版本。",
                     },
                 ],
                 "returns": [
@@ -221,7 +222,7 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
                 "errors": [
                     {"name": "invalid_path", "description": "path 不是工作目录下的相对路径。"},
                     {"name": "permission_denied", "description": "目标或父目录不可写。"},
-                    {"name": "conflict", "description": "expected_sha256 与当前文件版本不一致。"},
+                    {"name": "conflict", "description": "文件存在性或当前版本与写入前置条件不一致。"},
                     {"name": "too_large", "description": "写入内容超过协议限制。"},
                 ],
             },

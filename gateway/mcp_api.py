@@ -123,7 +123,7 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             "管理并操作当前用户拥有的远程 Agent。先调用 list_agents 选择目标设备；"
             "调用任何 Agent 专属工具前，必须先对目标 agent_id 调用 get_agent_capabilities。"
             "只有能力详情中的 Profile Action 明确列出当前工具的 mcp_tool 时才能调用，"
-            "网关会在调用时再次校验。workspace.v1 的 edit 必须先读取文件版本。"
+            "网关会在调用时再次校验。workspace.v1 覆盖已有文件或 edit 前必须先读取文件版本。"
         ),
         token_verifier=DatabaseTokenVerifier(db),
         auth=AuthSettings(
@@ -245,15 +245,16 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             "在指定在线 Agent 工作目录内整体写入 UTF-8 文本文件。"
             "调用前必须先对该 agent_id 调用 get_agent_capabilities；"
             "只有 Agent 声明 workspace.v1 且 workspace.v1/write 的 mcp_tool 为 remote_write_file 时才能调用。"
-            "path 必须是工作目录下的相对路径；可用 expected_sha256 防止覆盖并发修改。"
+            "path 必须是工作目录下的相对路径。expected_sha256 必须显式提供："
+            "传 null 时只允许新建，传最近一次读取的 SHA-256 时只允许覆盖该版本。"
         )
     )
     async def remote_write_file(
         agent_id: str,
         path: str,
         content: str,
+        expected_sha256: str | None,
         ctx: Context,
-        expected_sha256: str | None = None,
     ) -> dict[str, Any]:
         del ctx
         user_id = _current_user_id()
