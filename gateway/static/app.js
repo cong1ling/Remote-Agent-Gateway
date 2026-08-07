@@ -94,7 +94,7 @@ function formatBytes(value) {
   return `${value} bytes`;
 }
 
-function openProfileDialog(profileId) {
+function openProfileDialog(profileId, returnAgentId = "") {
   const profile = state.catalog.find((item) => item.id === profileId);
   if (!profile) return;
   const runtime = profile.runtime_contract || {};
@@ -127,6 +127,8 @@ function openProfileDialog(profileId) {
   const runtimeTitle = profile.id === "shell.v1" ? "Shell 方言声明" : "运行时声明";
   $("#profile-dialog-eyebrow").textContent = `${profile.id} · ${profile.status === "stable" ? "稳定" : profile.status}`;
   $("#profile-dialog-title").textContent = `${profile.name} 协议`;
+  $("#profile-dialog").dataset.returnAgentId = returnAgentId;
+  $("#profile-dialog-back").classList.toggle("hidden", !returnAgentId);
   $("#profile-dialog-body").innerHTML = `
     <section class="protocol-lead"><p>${escapeHtml(profile.description)}</p><div>${(profile.runtimes || []).map((item) => `<span>${escapeHtml(item)} 实现</span>`).join("")}</div></section>
     <section class="protocol-section"><div class="protocol-section-head"><div><span>Runtime</span><h3>${runtimeTitle}</h3></div><p>${escapeHtml(runtime.selection || "Agent 必须声明具体运行时。")}</p></div><div class="schema-list">${runtimeFields}</div><div class="dialect-grid">${dialects}</div></section>
@@ -177,6 +179,7 @@ function openAgentCapabilitiesDialog(agentId) {
   }).join("");
   $("#agent-capabilities-title").textContent = agent.name;
   $("#agent-capabilities-body").innerHTML = items || emptyState("没有可用能力", "该 Agent 尚未声明标准 Profile");
+  $("#agent-capabilities-dialog").dataset.agentId = agentId;
   $("#agent-capabilities-dialog").showModal();
 }
 
@@ -392,6 +395,12 @@ function bindEvents() {
   $("#secret-close").onclick = () => $("#secret-dialog").close();
   $("#agent-capabilities-close").onclick = () => $("#agent-capabilities-dialog").close();
   $("#agent-capabilities-done").onclick = () => $("#agent-capabilities-dialog").close();
+  $("#profile-dialog-back").onclick = () => {
+    const dialog = $("#profile-dialog");
+    const agentId = dialog.dataset.returnAgentId;
+    dialog.close();
+    if (agentId) openAgentCapabilitiesDialog(agentId);
+  };
   $("#profile-dialog-close").onclick = () => $("#profile-dialog").close();
   $("#profile-dialog-done").onclick = () => $("#profile-dialog").close();
   $("#copy-secret").onclick = () => copyText($("#secret-value").value, "Secret 已复制");
@@ -403,8 +412,10 @@ function bindEvents() {
     if (capabilitiesButton) openAgentCapabilitiesDialog(capabilitiesButton.dataset.agentCapabilities);
     const profileButton = target.closest("[data-profile-details]");
     if (profileButton) {
-      if ($("#agent-capabilities-dialog").open) $("#agent-capabilities-dialog").close();
-      openProfileDialog(profileButton.dataset.profileDetails);
+      const capabilitiesDialog = $("#agent-capabilities-dialog");
+      const returnAgentId = capabilitiesDialog.open ? capabilitiesDialog.dataset.agentId : "";
+      if (capabilitiesDialog.open) capabilitiesDialog.close();
+      openProfileDialog(profileButton.dataset.profileDetails, returnAgentId);
     }
     const agentId = target.dataset.editAgent;
     if (agentId) {
