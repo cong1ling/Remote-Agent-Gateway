@@ -103,10 +103,10 @@
 
   <dialog id="form-dialog">
     <form id="dialog-form" method="dialog">
-      <div class="dialog-head"><div><p id="dialog-eyebrow">Create</p><h2 id="dialog-title"></h2></div><button class="icon-button" value="cancel" aria-label="关闭" title="关闭" type="submit">×</button></div>
+      <div class="dialog-head"><div><p id="dialog-eyebrow">Create</p><h2 id="dialog-title"></h2></div><button class="icon-button" data-action="close-form-dialog" aria-label="关闭" title="关闭" type="button">×</button></div>
       <div id="dialog-fields"></div>
       <p id="dialog-error" class="form-error"></p>
-      <div class="dialog-actions"><button class="secondary" value="cancel" type="submit">取消</button><button id="dialog-submit" class="primary" value="default" type="submit">确认</button></div>
+      <div class="dialog-actions"><button class="secondary" data-action="close-form-dialog" type="button">取消</button><button id="dialog-submit" class="primary" value="default" type="submit">确认</button></div>
     </form>
   </dialog>
 

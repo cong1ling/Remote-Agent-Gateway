@@ -357,9 +357,9 @@ function bindEvents() {
   $$('[data-action="new-bundle"]').forEach((button) => button.onclick = openBundleForm);
   $$('[data-action="new-token"]').forEach((button) => button.onclick = () => openForm({ eyebrow: "Advanced Enrollment", title: "创建手动接入 Token", submit: "创建 Token", fields: '<label>令牌名称或备注<input name="name" required maxlength="80" placeholder="例如 CI 临时环境"></label>', onSubmit: (data) => createToken(data.get("name")) }));
   $$('[data-action="go-builder"]').forEach((button) => button.onclick = () => switchView("builder"));
+  $$('[data-action="close-form-dialog"]').forEach((button) => button.onclick = () => $("#form-dialog").close());
   $("#dialog-form").onsubmit = async (event) => {
     event.preventDefault();
-    if (event.submitter?.value === "cancel") { $("#form-dialog").close(); return; }
     const dialog = $("#form-dialog");
     const button = $("#dialog-submit");
     button.disabled = true;
