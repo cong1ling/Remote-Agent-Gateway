@@ -1,90 +1,161 @@
-# Profile 开发规范
+# Profile 与 Action 设计规范
 
-这份规范给后续维护网关和 Agent 的开发者使用。项目的目标是让 Agent 保持极简、让 MCP 工具保持稳定，因此 Profile 不是“想到一个功能就加一个”的插件清单。
+本文档是 Remote Agent Gateway 扩展能力时的权威设计约束。它记录稳定架构、协议边界和设计哲学，不记录开发过程。
 
-## Profile 的边界
+## 核心理念
 
-Profile 是网关定义的一份可验证能力契约，至少包含：
+网关是唯一 MCP 出口。远程 Agent 不是 MCP Server，也不运行 LLM；它只维护出站连接、设备身份和实际加载的能力 Handler。
 
-- 一个全局唯一的 ID，例如 `shell.v1`；
-- 能力说明、Action、参数、返回值、错误和限制；
-- 一个真正加载了 Handler 的远程实现；
-- 每个对 AI 开放的 Action 对应一个固定的 `mcp_tool`。
+```text
+AI / MCP Client
+      ↓ 固定 MCP 工具
+Gateway：认证、用户隔离、能力目录、路由、结果校验
+      ↓ WebSocket Profile/Action 协议
+Remote Agent Core
+      ↓
+Profile → Action → 本地系统能力
+```
 
-网关的 Profile Catalog 是协议来源。Agent 只能声明自己实际加载的 Profile，不能通过握手动态注册任意 MCP 工具。MCP 工具始终由网关固定发布，Agent 详情只决定某个 Agent 是否可以使用它。
+Profile 是跨语言、跨平台的固定能力契约；Handler 是具体实现。Python、Go、Rust、C 或移动端原生实现可以不同，但使用同一个 Profile ID 时，对外参数、结果、错误和限制必须一致。无法完整实现契约的环境不能声明该 Profile。
 
-## 新增 Profile 前，先证明“现有的表达不了”
+## Profile、Action 与 Core
 
-新增 Profile 的准入条件是：现有 Profile 或其 Action 无法在不歪曲契约的前提下表达需求，而且新需求具有独立、稳定的执行语义。
+- **Core**：凭据、Manifest、连接、心跳、重连、并发上限、请求路由和取消。
+- **Profile**：一组语义相关、权限边界接近的 Action，以及该实现的 runtime 声明。
+- **Action**：一个可独立测试和装配的具体操作，例如 `workspace.v1/read`。
+- **Common**：真正可复用的底层实现，例如安全路径解析、哈希和原子写入；Common 不是 Profile。
 
-开发前必须先检查：
+当前远端结构：
 
-1. `gateway/profiles.py` 中是否已有相同或近似的 Profile、Action 和 `mcp_tool`。
-2. `remote_agent/profiles/` 中现有 Handler 能否通过已有参数和返回契约完成需求。
-3. 差异是否只是运行环境、Shell 方言、可执行文件或默认值变化。
-4. 差异是否只是一个方便调用的别名、一个用户脚本或一次性的业务流程。
-5. 新需求是否需要不同的状态模型、数据通道、交互方式、权限边界或外部协议。
+```text
+remote_agent/profiles/
+├── base.py                 # ProfileContext、ActionHandler、ProfileHandler
+├── registry.py             # 静态 Profile Factory Registry
+├── common/                 # 跨 Action 复用的底层工具
+├── shell_v1/
+│   ├── profile.py
+│   ├── executor.py
+│   └── actions/exec.py
+└── workspace_v1/
+    ├── profile.py
+    └── actions/
+        ├── read.py
+        ├── write.py
+        └── edit.py
+```
 
-如果只是前四类情况，不要新增 Profile：
+`ProfileHandler` 负责 Action 映射、执行路由和取消路由；每个 Action 实现统一 `ActionHandler` 接口。`registry.py` 使用显式、静态 Factory 装配 Profile，不使用按 ID 展开的条件分支。
 
-- PowerShell、CMD、POSIX sh 是 `shell.v1` 的运行时方言，不是三个 Profile。
-- 用 Shell 读取一次系统信息，不需要另造 `system_info.v1`。
-- 给已有 Action 增加一个兼容的可选参数，优先评估扩展原有契约。
-- 用户自己的脚本、插件或工作流不应变成网关标准 Profile。
-- 不要为了让目录里“多一个能力”而硬凑 Profile。
+这种“可插拔”是源码和安装包级别的静态组合，不是用户运行时插件系统。普通用户不能上传 Handler、动态下载代码、使用 `pip entry_points` 注册能力或改变 MCP `tools/list`。
 
-只有在执行模型或契约确实不同，并且这种差异会影响 AI 的调用方式、返回数据或安全边界时，才考虑新 Profile。例如：
+## 新增 Profile 的准入条件
 
-| 需求 | 处理方式 |
-| --- | --- |
-| PowerShell 与 POSIX 命令 | 继续使用 `shell.v1`，通过 runtime 声明方言 |
-| 一次性 Shell 命令 | `shell.v1/exec` |
-| 持久会话、远程 stdin、PTY、TUI | 评估独立的 `terminal.v1` |
-| 可靠的结构化文本 read/write/edit | 只有 Shell 的传输语义明显不够时，才评估 `workspace.v1` |
-| 大文件或二进制流 | 评估独立的数据通道/Profile，不塞进 `shell.v1` |
-| 串口、GPIO 等硬件协议 | 进入硬件阶段后评估 `serial.v1`、`gpio.v1` 等 |
+新增 Profile 前必须先证明：现有 Profile 或 Action 无法在不歪曲契约的情况下表达需求，而且新需求具有独立、稳定的执行模型、数据通道、交互方式、权限边界或外部协议。
 
-在开始编码前，先写清楚一句话：
+开始编码前先回答：
 
 > 现有的 ______ 无法表达 ______，因为 ______；新 Profile 的独立契约是 ______。
 
-如果这句话写不清楚，通常说明还不该加 Profile。
+写不清楚时不应新增 Profile。以下情况通常不是新 Profile：
 
-## 版本和命名
+- PowerShell、CMD、POSIX sh：属于 `shell.v1` runtime 方言。
+- 一个方便调用的 Shell 命令或用户脚本：继续使用 `shell.v1`。
+- 编程语言或操作系统差异：属于 Handler 实现或 runtime 元数据。
+- 给现有 Action 增加兼容的可选参数：优先扩展现有契约。
+- 为了丰富目录而创建的能力：没有真实需求和 Handler 时不创建。
 
-- ID 使用 `<domain>.v<major>`，全局唯一、稳定、可读。
-- 不要用操作系统或编程语言命名 Profile；实现语言写在 `implementations`，运行差异写在 `runtime`。
-- 兼容性增强优先留在原 Profile；改变参数含义、返回结构、交互模型或安全边界时，才提高主版本号。
-- Action 名称在同一 Profile 内唯一，`mcp_tool` 名称在整个网关内唯一，不能复用已有固定工具名。
+只有 Profile 内所有 Action 都应由声明该 Profile 的 Agent 完整实现。当前协议不支持 Action 子集声明；如果 Action 长期需要独立安装、授权或版本演进，应重新检查 Profile 是否过大，而不是立即增加复杂权限模型。
 
-## 实现顺序
+## 网关与 Agent 的双层定义
 
-1. 在 `gateway/profiles.py` 注册完整契约：说明、状态、实现入口、Action、参数、返回值、错误和限制。
-2. 在 `remote_agent/profiles/` 实现 `ProfileHandler`，只实现注册表中声明的 Action，并在启动时返回真实 runtime 声明。
-3. 在 `remote_agent/profiles/__init__.py` 接入 Handler；Builder 必须能够按 Profile 选择并打包它。
-4. 在网关 MCP 层增加语义明确的固定工具。工具描述必须告诉 AI：
+网关 `gateway/profiles.py` 是 AI 可见协议的来源，维护名称、说明、Action、参数、返回值、错误、限制、runtime 契约和固定 `mcp_tool`。
 
-   > 调用前必须先对目标 `agent_id` 调用 `get_agent_capabilities`；只有 Agent 声明了对应 Profile，且能力详情中该 Action 的 `mcp_tool` 是当前工具时才能调用；网关会再次校验。
+远程 Agent Registry 只维护可执行实现 Factory。两边共享 Profile ID、Action 名称和协议语义，但 Agent 不依赖完整网关代码，以便未来使用其他语言实现。
 
-5. 网关调用路径同时校验用户所有权、Agent 是否声明 Profile、Action 是否存在以及返回值是否符合契约。工具描述是引导，不是权限边界。
-6. 增加必要测试：声明校验、Handler 路由、Builder 打包、`tools/list` 与 `mcp_tool` 映射、无该 Profile 的 Agent 被拒绝、结果契约校验。
-7. 更新 README 和根目录 `DECISIONS.md`，说明为什么现有 Profile 无法表达它，以及主要取舍。
+每个对 AI 开放的 Action 必须映射到一个语义明确的固定 MCP 工具。AI 的调用顺序是：
 
-## 不要做的事
+```text
+list_agents
+→ get_agent_capabilities(agent_id)
+→ 读取 Profile Action 中的 mcp_tool
+→ 调用固定 MCP 工具
+```
+
+工具描述必须要求 AI 先查询能力；网关调用时仍要重新校验用户所有权、Agent Profile、Action 到 MCP 工具的映射及返回结果。描述是引导，不是权限机制。
+
+## `workspace.v1`
+
+`workspace.v1` 是受工作目录约束的远程 UTF-8 文本数据通道，不是上传下载系统，也不是分布式文件系统。它与 `shell.v1` 的区别在于：Shell 接收环境相关命令字符串；Workspace 提供跨平台固定的结构化文件语义。
+
+| Action | 固定 MCP 工具 | 语义 |
+| --- | --- | --- |
+| `read` | `remote_read_file` | 按行读取文本并返回整个文件的 SHA-256 |
+| `write` | `remote_write_file` | 原子地整体创建或覆盖文本，可选版本校验 |
+| `edit` | `remote_edit_file` | 按已读取版本精确替换唯一一处文本并返回 diff |
+
+### 工作目录与路径
+
+- 复用 Agent 启动参数 `--workdir`，不增加第二个 Workspace 根目录。
+- 工作台只组装 Profile，不把远程机器绝对路径写进 ZIP 或 Manifest。
+- MCP 只接受使用 `/` 分隔的工作目录相对路径。
+- 拒绝绝对路径、`..` 和解析后逃出工作目录的符号链接。
+- Agent runtime 只声明 `scope=workdir`，不向 AI 暴露绝对根路径。
+
+### 文本与限制
+
+- 首版仅支持 UTF-8 文本，不读取图片或任意二进制。
+- 单文件最多 8 MiB；单次 write 最多 2 MiB。
+- read 默认最多 2000 行，返回内容最多 50 KiB，超出时返回 `truncated=true`。
+- edit 保留 UTF-8 BOM 和原有 CRLF/LF 风格。
+- edit 的 unified diff 最多 50 KiB，并通过 `diff_truncated` 声明截断。
+- 首版 edit 只做精确匹配和换行归一化，不默认启用智能引号、特殊空格等模糊匹配。
+
+### 网络语义
+
+本地文件系统是唯一真实来源，网关不缓存、复制或持久化用户文件。
+
+- write 使用同目录临时文件和原子替换，防止半写文件。
+- read 返回整个文件的 SHA-256。
+- edit 强制携带最近一次 read 得到的 `expected_sha256`；版本不一致返回 `conflict`。
+- write 可选 `expected_sha256`；相同内容的重复写返回 `changed=false`。
+- 网络断线可能产生“本地已执行但响应丢失”，系统不承诺恰好执行一次；调用方应重新 read 验证状态。
+- 不引入 CRDT、分布式锁、离线合并、网关文件缓存或请求合并。
+
+### 权限边界
+
+Workspace 的路径限制始终有效于 Workspace Action，但不是操作系统沙箱。如果同一 Agent 同时加载 `shell.v1`，Shell 仍拥有该系统账号的完整权限，可以访问工作目录之外的位置。
+
+- 同时加载 Shell 时，Workspace 提供结构化语义、防误操作和冲突检测，不提供强隔离。
+- 只加载 Workspace 时，能力面更窄，但真正抵御本机恶意进程仍需操作系统用户、容器或沙箱。
+- 不以 `--workdir` 宣称限制 Shell 权限。
+
+## 扩展方式
+
+新增 Profile：
+
+1. 证明现有 Profile 无法表达需求并定义稳定边界。
+2. 在网关 Catalog 注册完整协议和固定 MCP 工具映射。
+3. 新建独立 Profile package，并把 Action 拆成单独模块。
+4. 在远端静态 Registry 增加 Factory。
+5. 只把真正跨 Action 的实现提取到 Common。
+6. 更新 Builder，使所选 Profile package 被完整打包。
+7. 在 MCP 工具中校验所有权、Profile、Action 映射和结果契约。
+8. 为路径、鉴权、路由、冲突、取消、结果限制等关键边界增加测试，并完成真实 Gateway → Agent 调用。
+
+新增 Action：
+
+1. 确认它与 Profile 的语义和权限边界一致。
+2. 实现 `ActionHandler` 并在 Profile 中静态装配。
+3. 在网关 Catalog 增加契约和固定 MCP 工具。
+4. 所有声明该 Profile 的官方 Handler 必须同步实现该 Action。
+
+未来的 `terminal.v1`、`camera.v1`、`mobile.*`、`serial.v1` 或 `artifact.v1` 仍遵循同一结构。持久 PTY、实时媒体、大文件二进制流和硬件协议具有独立数据与生命周期语义，不应塞进 `shell.v1` 或 `workspace.v1`。
+
+## 明确不做
 
 - 不按每台 Agent 动态生成 MCP 工具。
-- 不用万能的 `remote_call(profile, action, params)` 代替语义明确的固定工具。
-- 不把 Agent 自己声明的任意字符串直接当成可用能力。
-- 不把上传下载、审计、团队权限或插件市场顺手塞进一个看似相关的 Profile。
-- 不为了未来可能用到而提前设计一组没有真实 Handler 的 Profile。
-
-## 完成标准
-
-一个新 Profile 只有在以下问题都能回答“是”时才算完成：
-
-- 它解决的是现有 Profile 无法诚实表达的独立问题；
-- 网关和 Agent 都有对应实现，且声明与实际 Handler 一致；
-- AI 可以先发现 Agent，再从能力详情得到准确的 `mcp_tool` 和契约；
-- 网关会在调用时重新校验所有权、能力和结果；
-- 没有引入动态 MCP、隐含权限或不必要的持久化；
-- 失败、限制、版本变化和迁移方式都有明确说明。
+- 不使用万能 `remote_call(profile, action, params)` 替代强类型工具。
+- 不支持用户运行时上传、下载或注册自定义 Handler。
+- 不实现插件市场、远程代码下载或 Agent 自更新执行器。
+- 不把图片、视频和大文件 Base64 塞进普通 Workspace 响应。
+- 不因为某个设备类型存在就创建一个无限扩张的“大 Profile”。

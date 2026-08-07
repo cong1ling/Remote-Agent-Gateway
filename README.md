@@ -50,9 +50,8 @@ Profile 是网关定义的能力契约，一个 Profile 可以包含多个语义
 
 ## 未来构想
 
-第一阶段先把 `shell.v1` 做稳，后续沿着“网关统一、远端极简”的路线扩展：
+当前已经提供 `shell.v1` 和 `workspace.v1`，后续继续沿着“网关统一、远端极简”的路线扩展：
 
-- `workspace.v1`（设计中）：在统一文本契约下提供 `read`、`write`、`edit`，让 AI 更可靠地处理工作区文件；它不是通用上传下载系统。
 - 手机与移动端 Agent（规划中）：手机只暴露明确、受限的设备能力；设备太弱时，Agent 也可以运行在旁边的电脑、路由器或 NAS 上。
 - 摄像头与边缘设备（规划中）：控制、状态和快照可以成为标准 Profile；实时视频等大数据会走独立媒体通道，不塞进普通 MCP 调用。
 - 多语言与嵌入式实现（规划中）：用 Go、Rust、C 或平台原生 API 重写轻量 Agent，网关和 AI 侧的 MCP 入口保持不变。
@@ -68,7 +67,8 @@ Profile 是网关定义的能力契约，一个 Profile 可以包含多个语义
 - Agent 心跳、离线检测、断线重连和稳定 ID
 - Agent 名称、用途描述、在线状态和 Profile 管理
 - Agent 工作台：从可信 Profile Catalog 组装并下载独立 Python Agent ZIP
-- MCP 工具：`list_agents`、`get_agent_capabilities`、`remote_exec`
+- Profile：`shell.v1`、`workspace.v1`
+- MCP 工具：`list_agents`、`get_agent_capabilities`、`remote_exec`、`remote_read_file`、`remote_write_file`、`remote_edit_file`
 - Web 管理端
 - SQLite 持久化，数据库仅保存令牌哈希
 
@@ -195,6 +195,9 @@ remote_agent/
 list_agents()
 get_agent_capabilities(agent_id)
 remote_exec(agent_id, command, timeout)
+remote_read_file(agent_id, path, offset, limit)
+remote_write_file(agent_id, path, content, expected_sha256)
+remote_edit_file(agent_id, path, old_text, new_text, expected_sha256)
 ```
 
 `get_agent_capabilities` 返回的每个 Profile Action 都会携带对应的固定 `mcp_tool` 名称。例如 `shell.v1/exec` 明确映射到 `remote_exec`，AI 无需根据描述猜测调用入口。Profile 只描述标准能力，MCP 工具仍由网关固定发布，不会按 Agent 动态注册。

@@ -197,3 +197,11 @@
 - **替代方案**：允许任何新功能直接注册 Profile；为每个操作系统或语言创建独立 Profile；通过万能 `remote_call` 把所有差异延迟到运行时。
 - **取舍**：前期会拒绝一些看起来方便但语义重复的扩展，新增能力需要先写清楚“不应复用现有 Profile”的理由；换取更小的协议面、更稳定的 MCP 工具和更容易移植到其他语言的 Agent Core。
 - **影响**：不改变现有 `shell.v1` 协议或工具名称。未来的 Profile 设计、代码评审和 `DECISIONS.md` 记录均采用该准入标准；工具描述必须引导 AI 先查询能力详情，网关仍负责实际权限校验。
+
+## 2026-08-07：Profile 静态组合 Action，并发布受限文本工作区
+
+- **决策**：远程 Profile 改为由统一 `ProfileHandler` 静态组合多个 `ActionHandler`，通过显式 Factory Registry 装配；发布 `workspace.v1`，包含 `read`、`write`、`edit` 三个 Action，分别映射固定 MCP 工具。Workspace 复用 `--workdir`，只接受相对路径和 UTF-8 文本，使用原子写入与 SHA-256 乐观并发控制。Agent 版本升级为 0.2.0、Core 升级为 v5，WebSocket 协议保持 v2。
+- **原因**：第二个 Profile 出现后，原先在单个 `shell_v1.py` 中混合 Profile、Action、Runtime 和 Executor 会持续增加硬编码；同时 Shell 命令不适合作为大量远程文本传输与并发编辑协议。静态 Action 组合使实现可独立测试和打包，而结构化 Workspace 能处理网络断线、半写和旧版本覆盖问题。
+- **替代方案**：继续在 Profile 的 `execute` 中按字符串分支；使用动态 import、`pip entry_points` 或用户插件；仅依赖 Shell 读写；实现完整上传下载、分布式锁或网关文件缓存；为 Workspace 使用独立于 Shell 的第二个根目录。
+- **取舍**：新增了明确的 Profile package、Action 模块和结果契约，并要求 edit 先 read 获取版本；换取稳定的扩展结构、跨平台文本语义和可发现的网络冲突。Workspace 路径限制在同时存在 `shell.v1` 时不是系统安全沙箱，真正隔离仍依赖 OS 用户、容器或沙箱。
+- **影响**：MCP 固定工具增加 `remote_read_file`、`remote_write_file`、`remote_edit_file`；工作台可组装 Shell、Workspace 或二者组合的 Python Agent；首版不支持图片、二进制、上传下载、Action 子集、动态插件或恰好执行一次语义。未来 Profile 与 Action 的扩展方式以 `PROFILE_DEVELOPMENT.md` 为准。
