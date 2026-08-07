@@ -15,9 +15,6 @@ from typing import Any
 
 from remote_agent.core.errors import FatalAgentError
 
-from .base import ProfileHandler
-
-
 MAX_CAPTURE_BYTES = 2 * 1024 * 1024
 TRUNCATION_MARKER = b"\n[output truncated by remote agent]\n"
 
@@ -215,26 +212,3 @@ class ShellExecutor:
                 pass
         if process.returncode is None:
             process.kill()
-
-
-class ShellV1Profile(ProfileHandler):
-    profile_id = "shell.v1"
-
-    def __init__(self, workdir: Path):
-        self.executor = ShellExecutor(workdir)
-
-    def runtime_metadata(self) -> dict[str, str]:
-        return self.executor.runtime.public_metadata()
-
-    async def execute(
-        self,
-        action: str,
-        request_id: str,
-        params: dict[str, Any],
-    ) -> dict[str, Any]:
-        if action != "exec":
-            raise ValueError(f"shell.v1 不支持操作: {action}")
-        return await self.executor.execute(request_id, params)
-
-    async def cancel(self, request_id: str) -> None:
-        await self.executor.cancel(request_id)

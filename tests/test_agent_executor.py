@@ -60,7 +60,7 @@ class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
                 ShellRuntime("linux", "posix-sh", "/bin/sh"),
             )
             with patch(
-                "remote_agent.profiles.shell_v1.asyncio.create_subprocess_exec",
+                "remote_agent.profiles.shell_v1.executor.asyncio.create_subprocess_exec",
                 new=create_process,
             ):
                 result = await executor.execute(
