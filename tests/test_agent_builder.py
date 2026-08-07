@@ -32,6 +32,8 @@ class AgentBuilderTests(unittest.TestCase):
                 self.assertIn(f"{root}/remote_agent/profiles/common/filesystem.py", names)
                 self.assertIn(f"{root}/remote_agent/profiles/shell_v1/__init__.py", names)
                 self.assertIn(f"{root}/remote_agent/profiles/shell_v1/actions/exec.py", names)
+                self.assertFalse(any("__pycache__" in name for name in names))
+                self.assertFalse(any(name.endswith(".pyc") for name in names))
                 self.assertIn(f"{root}/.gitignore", names)
                 self.assertIn(f"{root}/github-actions.yml.example", names)
                 manifest = json.loads(

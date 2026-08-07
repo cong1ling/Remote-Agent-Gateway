@@ -259,6 +259,7 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
                     {"name": "path", "type": "string", "description": "规范化后的工作区相对路径。"},
                     {"name": "changed", "type": "boolean", "description": "文件内容是否发生变化。"},
                     {"name": "diff", "type": "string", "description": "修改前后的 unified diff。"},
+                    {"name": "diff_truncated", "type": "boolean", "description": "diff 是否因输出上限被截断。"},
                     {"name": "first_changed_line", "type": "integer", "description": "首个修改行号。"},
                     {"name": "sha256", "type": "string", "description": "修改后整个文件内容的 SHA-256。"},
                 ],
@@ -550,11 +551,13 @@ def _validate_workspace_result(action: str, result: dict[str, Any]) -> dict[str,
     if action == "edit":
         changed = result.get("changed")
         diff = result.get("diff")
+        diff_truncated = result.get("diff_truncated")
         first_changed_line = result.get("first_changed_line")
         if (
             not isinstance(changed, bool)
             or not isinstance(diff, str)
-            or len(diff.encode("utf-8")) > WORKSPACE_MAX_WRITE_BYTES
+            or len(diff.encode("utf-8")) > WORKSPACE_MAX_READ_BYTES
+            or not isinstance(diff_truncated, bool)
             or not isinstance(first_changed_line, int)
             or isinstance(first_changed_line, bool)
             or first_changed_line < 1
@@ -564,6 +567,7 @@ def _validate_workspace_result(action: str, result: dict[str, Any]) -> dict[str,
             "path": path,
             "changed": changed,
             "diff": diff,
+            "diff_truncated": diff_truncated,
             "first_changed_line": first_changed_line,
             "sha256": sha256.lower(),
         }

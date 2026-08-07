@@ -10,10 +10,11 @@ from remote_agent.profiles.common.filesystem import (
     WorkspaceError,
     atomic_write_bytes,
     resolve_workspace_path,
+    truncate_utf8,
 )
 
 from .write import validate_expected_sha256
-from ..constants import MAX_FILE_BYTES, MAX_WRITE_BYTES
+from ..constants import MAX_FILE_BYTES, MAX_READ_BYTES, MAX_WRITE_BYTES
 
 
 def _normalize_newlines(value: str) -> str:
@@ -52,14 +53,18 @@ class EditAction(ActionHandler):
             raise WorkspaceError("invalid_params", "old_text 和 new_text 必须不同")
         if expected is None:
             raise WorkspaceError("invalid_params", "edit 必须提供 expected_sha256")
+        if not path.exists():
+            raise WorkspaceError("not_found", f"文件不存在: {display_path}")
+        if not path.is_file():
+            raise WorkspaceError("invalid_path", f"目标不是文件: {display_path}")
         try:
             raw = path.read_bytes()
         except FileNotFoundError as exc:
             raise WorkspaceError("not_found", f"文件不存在: {display_path}") from exc
         except PermissionError as exc:
             raise WorkspaceError("permission_denied", f"无法读取文件: {display_path}") from exc
-        if not path.is_file():
-            raise WorkspaceError("invalid_path", f"目标不是文件: {display_path}")
+        except OSError as exc:
+            raise WorkspaceError("read_failed", f"读取文件失败: {display_path}") from exc
         if len(raw) > MAX_FILE_BYTES:
             raise WorkspaceError("too_large", f"文件超过 {MAX_FILE_BYTES} bytes 限制")
         actual = hashlib.sha256(raw).hexdigest()
@@ -74,6 +79,8 @@ class EditAction(ActionHandler):
         normalized = _normalize_newlines(text)
         old_normalized = _normalize_newlines(old_text)
         new_normalized = _normalize_newlines(new_text)
+        if old_normalized == new_normalized:
+            raise WorkspaceError("invalid_params", "归一化后 old_text 和 new_text 必须不同")
         matches = normalized.count(old_normalized)
         if matches == 0:
             raise WorkspaceError("not_found", "old_text 未匹配到文件内容")
@@ -86,7 +93,6 @@ class EditAction(ActionHandler):
         output = (b"\xef\xbb\xbf" if has_bom else b"") + output_text.encode("utf-8")
         if len(output) > MAX_WRITE_BYTES:
             raise WorkspaceError("too_large", f"修改后文件超过 {MAX_WRITE_BYTES} bytes 限制")
-        atomic_write_bytes(path, output)
         diff = "".join(
             difflib.unified_diff(
                 normalized.splitlines(keepends=True),
@@ -95,10 +101,16 @@ class EditAction(ActionHandler):
                 tofile=f"b/{display_path}",
             )
         )
+        diff, diff_truncated = truncate_utf8(diff, MAX_READ_BYTES)
+        first_changed_line = _first_changed_line(normalized, updated)
+        if first_changed_line is None:
+            raise WorkspaceError("invalid_params", "编辑没有产生有效变化")
+        atomic_write_bytes(path, output)
         return {
             "path": display_path,
             "changed": True,
             "diff": diff,
-            "first_changed_line": _first_changed_line(normalized, updated),
+            "diff_truncated": diff_truncated,
+            "first_changed_line": first_changed_line,
             "sha256": hashlib.sha256(output).hexdigest(),
         }

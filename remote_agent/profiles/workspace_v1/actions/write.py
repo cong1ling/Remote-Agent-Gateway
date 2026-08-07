@@ -52,7 +52,12 @@ class WriteAction(ActionHandler):
         if path.exists():
             if not path.is_file():
                 raise WorkspaceError("invalid_path", f"目标不是文件: {display_path}")
-            current = path.read_bytes()
+            try:
+                current = path.read_bytes()
+            except PermissionError as exc:
+                raise WorkspaceError("permission_denied", f"无法读取文件: {display_path}") from exc
+            except OSError as exc:
+                raise WorkspaceError("read_failed", f"读取文件失败: {display_path}") from exc
             if expected is not None and hashlib.sha256(current).hexdigest() != expected:
                 raise WorkspaceError("conflict", "文件版本已变化，请重新读取后再写入")
         elif expected is not None:

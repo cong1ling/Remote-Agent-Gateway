@@ -179,7 +179,7 @@ class PythonAgentBuilder:
         if not source.is_dir():
             raise AgentBuildError(f"Agent 源目录不存在: {source.name}")
         for child in sorted(source.rglob("*")):
-            if child.is_file():
+            if child.is_file() and child.suffix == ".py":
                 self._write_file(archive, child, archive_root)
 
 

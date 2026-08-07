@@ -13,6 +13,19 @@ class WorkspaceError(ValueError):
         super().__init__(f"{code}: {message}")
 
 
+def truncate_utf8(value: str, maximum: int) -> tuple[str, bool]:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= maximum:
+        return value, False
+    truncated = encoded[:maximum]
+    while truncated:
+        try:
+            return truncated.decode("utf-8"), True
+        except UnicodeDecodeError:
+            truncated = truncated[:-1]
+    return "", True
+
+
 def resolve_workspace_path(root: Path, raw_path: object) -> tuple[Path, str]:
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise WorkspaceError("invalid_path", "path 必须是非空字符串")

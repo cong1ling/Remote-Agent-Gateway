@@ -5,23 +5,13 @@ from pathlib import Path
 from typing import Any
 
 from remote_agent.profiles.base import ActionHandler
-from remote_agent.profiles.common.filesystem import WorkspaceError, resolve_workspace_path
+from remote_agent.profiles.common.filesystem import (
+    WorkspaceError,
+    resolve_workspace_path,
+    truncate_utf8,
+)
 
 from ..constants import MAX_FILE_BYTES, MAX_READ_BYTES, MAX_READ_LINES
-
-
-def _truncate_utf8(value: str, maximum: int) -> tuple[str, bool]:
-    encoded = value.encode("utf-8")
-    if len(encoded) <= maximum:
-        return value, False
-    truncated = encoded[:maximum]
-    while True:
-        try:
-            return truncated.decode("utf-8"), True
-        except UnicodeDecodeError:
-            truncated = truncated[:-1]
-
-
 class ReadAction(ActionHandler):
     action_id = "read"
 
@@ -48,14 +38,18 @@ class ReadAction(ActionHandler):
             raise WorkspaceError("invalid_params", "offset 和 limit 必须是正整数")
         if limit > MAX_READ_LINES:
             raise WorkspaceError("too_large", f"limit 不能超过 {MAX_READ_LINES}")
+        if not path.exists():
+            raise WorkspaceError("not_found", f"文件不存在: {display_path}")
+        if not path.is_file():
+            raise WorkspaceError("invalid_path", f"目标不是文件: {display_path}")
         try:
             raw = path.read_bytes()
         except FileNotFoundError as exc:
             raise WorkspaceError("not_found", f"文件不存在: {display_path}") from exc
         except PermissionError as exc:
             raise WorkspaceError("permission_denied", f"无法读取文件: {display_path}") from exc
-        if not path.is_file():
-            raise WorkspaceError("invalid_path", f"目标不是文件: {display_path}")
+        except OSError as exc:
+            raise WorkspaceError("read_failed", f"读取文件失败: {display_path}") from exc
         if len(raw) > MAX_FILE_BYTES:
             raise WorkspaceError("too_large", f"文件超过 {MAX_FILE_BYTES} bytes 限制")
         digest = hashlib.sha256(raw).hexdigest()
@@ -70,13 +64,13 @@ class ReadAction(ActionHandler):
             raise WorkspaceError("invalid_params", "offset 超过文件末尾")
         start = offset - 1
         selected = lines[start : start + limit]
-        content, byte_truncated = _truncate_utf8("".join(selected), MAX_READ_BYTES)
-        line_truncated = start + len(selected) < len(lines)
+        content, byte_truncated = truncate_utf8("".join(selected), MAX_READ_BYTES)
+        line_truncated = start > 0 or start + len(selected) < len(lines)
         return {
             "path": display_path,
             "content": content,
             "offset": offset,
-            "lines": len(selected),
+            "lines": len(content.splitlines()),
             "total_lines": len(lines),
             "truncated": line_truncated or byte_truncated,
             "size": len(raw),

@@ -36,6 +36,7 @@ class WorkspaceProfileTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
             self.assertTrue(edited["changed"])
+            self.assertFalse(edited["diff_truncated"])
             self.assertIn("-two", edited["diff"])
             self.assertIn("+three", edited["diff"])
             final = await profile.execute("read", "read-2", {"path": "src/demo.txt"})
