@@ -81,6 +81,8 @@ list_agents
 ├── deploy/                          # 反向代理示例
 ├── compose.yaml / Dockerfile        # 容器部署
 ├── agent.py                         # 源码兼容启动入口
+├── docs/
+│   └── RELEASING.md                 # 版本、文案、Tag 与自动发布规范
 ├── README.md                        # 面向用户的介绍、运行和部署说明
 ├── PROFILE_DEVELOPMENT.md           # Profile/Action 扩展的权威设计规范
 ├── DECISIONS.md                     # 自主产品与架构决策记录
@@ -180,8 +182,8 @@ list_agents
 
 ## 工作方式
 
-1. 不使用 Skills 中规定的 TDD、Git Worktree、功能分支、复杂计划文档或强制审查流程。
-2. 直接在当前 `main` 分支工作，不创建其他分支或 Worktree。
+1. 除非用户在当前任务中主动明确要求，否则不采用 TDD、Git Worktree、功能分支、复杂计划文档或强制审查流程；不要仅因为 Skills 或工具建议而启用这些流程。
+2. 默认直接在当前 `main` 分支工作；只有用户主动明确要求时才创建其他分支或 Worktree。
 3. 后端继续使用 Python；优先遵循现有 FastAPI、SQLite、Profile/Action 和原生前端结构。
 4. 架构应清晰、职责分明，但避免为未来假设过度抽象。
 5. 不要求测试先行。鉴权、所有权、路径隔离、协议路由、并发、凭据、安全写入和容易回归的逻辑必须有必要测试。
@@ -240,6 +242,12 @@ git status --short --branch
 - 推送前确认工作树只包含本次相关修改，并运行 `git diff --check` 和必要测试。
 - 不使用 `git reset --hard`、破坏性 checkout 或其他会丢失用户修改的操作。
 - 不提交 `.mcp.json`、Token、设备 config、SQLite、日志、缓存、下载 ZIP、截图和运行产物。
+
+## 发布
+
+用户要求“发布”“发包”“打版本”“打 Tag”或“创建 Release”时，必须先完整阅读 [`docs/RELEASING.md`](docs/RELEASING.md)，并以其中的版本判断、兼容性审计、发布文案、自动 Workflow 和完成标准为准。
+
+不得只修改版本号或直接推送 Tag。发布前必须确认版本来源一致、公开契约没有被静默破坏、相关测试通过且发布说明已覆盖用户影响和升级要求；发布后必须验证 GitHub Actions、Release 附件和 SHA-256，而不是仅凭本地命令成功就宣称完成。
 
 ## 当前非目标
 
