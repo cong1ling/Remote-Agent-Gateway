@@ -120,9 +120,20 @@ class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
             command = python_command(executor.runtime, "import time;time.sleep(10)")
             started = time.monotonic()
             with self.assertRaises(TimeoutError):
-                await executor.execute("request-2", {"command": command, "timeout": 0.1})
+                await executor.execute("request-2", {"command": command, "timeout": 1})
             # Includes cold shell startup and process-tree cleanup on hosted Windows runners.
             self.assertLess(time.monotonic() - started, 5.0)
+
+    async def test_exec_rejects_timeout_outside_profile_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executor = ShellExecutor(Path(directory))
+            for timeout in (0, -1, 0.1, True, "1"):
+                with self.subTest(timeout=timeout):
+                    with self.assertRaisesRegex(ValueError, "大于等于 1 的整数"):
+                        await executor.execute(
+                            "request-invalid-timeout",
+                            {"command": "echo test", "timeout": timeout},
+                        )
 
     async def test_exec_caps_output_without_blocking_process(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -123,9 +123,9 @@ class ShellExecutor:
         command = params.get("command")
         if not isinstance(command, str) or not command.strip():
             raise ValueError("command 不能为空")
-        timeout = float(params.get("timeout", 300))
-        if timeout <= 0:
-            raise ValueError("timeout 必须大于 0")
+        timeout = params.get("timeout", 300)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+            raise ValueError("timeout 必须是大于等于 1 的整数")
 
         process_options: dict[str, Any] = {}
         if os.name == "nt":
