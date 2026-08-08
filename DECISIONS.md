@@ -229,3 +229,11 @@
 - **替代方案**：允许旧 Agent 在线并只在 MCP write 时按版本拦截；升级整个 WebSocket 协议并拒绝全部旧 Agent；发布 `workspace.v2`；信任用户看到升级提示后自行更新。
 - **取舍**：旧 Workspace Agent 在更新前无法继续使用 read/edit 等仍兼容的 Action，但避免同一 Profile ID 同时存在两套相互冲突的 write 语义。纯 Shell 旧 Agent 不受影响，检查逻辑保持由 Registry 数据驱动。
 - **影响**：旧 Workspace Agent 重连会收到明确的重新组装提示，Enrollment Token 不会在兼容检查失败时被消费；Profile Catalog、能力详情和网页协议窗口会公开最低 Agent 版本。
+
+## 2026-08-08：按契约层次定义兼容性
+
+- **决策**：兼容性分为传输、Profile 契约和实现版本三层。同一 Profile ID 必须保持参数、结果、错误和安全语义一致；未发布阶段的破坏性草案可以通过最低 Agent 版本拒绝旧实现；正式发布后的破坏性 Profile 变更必须使用新的主版本 ID、协议版本或迁移路径。
+- **原因**：`workspace.v1/write` 只改了少量代码，但改变了 `expected_sha256=null` 的行为和安全边界。若把“改动小”误认为“兼容”，同一 Profile ID 会在不同 Agent 上静默代表两套语义，网关无法可靠保证安全。
+- **替代方案**：永远兼容旧行为；为所有历史 Agent 保留双协议分支；立即把当前修正改名为 `workspace.v2`；仅在 MCP 调用时临时判断版本。
+- **取舍**：当前未发布阶段优先保证契约和安全语义，旧 Workspace 草案需要重新组装；正式发布后通过 Profile 主版本和迁移流程保护生态兼容，而不是复制旧实现。
+- **影响**：后续 Profile、Action、Agent Core 和 MCP 工具设计必须先标记变更属于兼容还是破坏性；`minimum_agent_version` 只作为过渡期的明确拒绝机制，不替代正式版本治理。
