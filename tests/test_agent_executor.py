@@ -117,11 +117,12 @@ class ShellExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_exec_enforces_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             executor = ShellExecutor(Path(directory))
-            command = python_command(executor.runtime, "import time;time.sleep(2)")
+            command = python_command(executor.runtime, "import time;time.sleep(10)")
             started = time.monotonic()
             with self.assertRaises(TimeoutError):
                 await executor.execute("request-2", {"command": command, "timeout": 0.1})
-            self.assertLess(time.monotonic() - started, 1.5)
+            # Includes cold shell startup and process-tree cleanup on hosted Windows runners.
+            self.assertLess(time.monotonic() - started, 5.0)
 
     async def test_exec_caps_output_without_blocking_process(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
