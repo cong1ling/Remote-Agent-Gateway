@@ -148,6 +148,9 @@ list_agents
 - PowerShell 对象输出必须完成默认格式化，不能因为包装脚本提前退出而丢失 stdout。
 - 超时、取消和断线必须终止整个命令进程树。
 - `--workdir` 只是 Shell 初始目录，不是 Shell 权限沙箱。Shell 拥有 Agent 系统账号的完整权限。
+- Shell 命令策略由网关按 Agent 保存，不下发或依赖远端配置文件；当前只有默认 `off` 和 `standard` 两种模式。
+- `standard` 仅在 `remote_exec` 转发前拦截磁盘管理、系统电源、权限提升、系统凭据、持久化入口和关闭安全防护六类系统级动作；不拦截普通文件删除、项目修改、依赖安装、构建或测试。
+- 策略匹配根据 Agent 最近声明的 Shell runtime 选择 PowerShell、CMD 或 POSIX Shell 实现。它是误操作防护，不是 Shell 沙箱；不新增 `strict`、用户自定义规则、命令日志或远端策略文件。
 
 ## `workspace.v1` 约束
 

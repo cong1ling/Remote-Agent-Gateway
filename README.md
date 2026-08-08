@@ -49,6 +49,7 @@ Remote Agent Gateway 把复杂部分集中在网关：
 - Agent 心跳、掉线检测、自动重连、稳定设备 ID 和版本状态
 - 固定 Profile Catalog、参数校验、结果校验和 MCP 工具映射
 - 每台 Agent 最多同时执行 5 个请求，第 6 个立即返回忙碌
+- 每台 Shell Agent 可在网关配置命令拦截策略，默认关闭
 - 原生 Web 管理端与 SQLite 持久化
 - Docker Compose 自行部署
 
@@ -151,6 +152,9 @@ remote_edit_file(agent_id, path, old_text, new_text, expected_sha256)
 - 子进程 stdin 固定为 `DEVNULL`，不支持编辑器、REPL、密码提示、SSH 交互、TUI 或 PTY。
 - 超时、取消和断线会终止整个命令进程树。
 - `--workdir` 只是 Shell 初始目录，不是 Shell 权限沙箱。
+- 网关可按 Agent 配置命令拦截策略：默认 `off`；`standard` 会在转发前拦截磁盘管理、系统电源、权限提升、系统凭据、持久化入口和关闭安全防护等系统级操作。
+- 命中标准策略时，命令不会发送到远端 Agent；MCP 返回 `command_blocked` 和命中的规则 ID。
+- 标准策略不拦截普通文件删除、项目修改、依赖安装、构建或测试。它只检查收到的命令文本，不是操作系统沙箱，也不能替代独立 OS 用户、容器或虚拟机。
 
 ### `workspace.v1`
 
@@ -172,6 +176,7 @@ remote_edit_file(agent_id, path, old_text, new_text, expected_sha256)
 Remote Agent Gateway 提供认证、用户所有权、Token 哈希、Profile 契约、路径约束和乐观并发控制，但不会把完整 Shell 伪装成安全沙箱。
 
 - `remote_exec` 拥有 Agent 所在系统账号的完整权限。
+- Shell 命令策略由 Agent 所属用户在网页“能力”详情中的 `shell.v1` 项配置，默认关闭；策略在网关转发前执行，远端 Agent 无需重启或修改配置文件。
 - 只应在自己拥有或明确获准管理的设备上运行 Agent。
 - 真正的权限隔离应依赖独立 OS 用户、容器、虚拟机或平台沙箱。
 - MCP Access Key、Enrollment Token 和长期设备凭据是三种不同凭据，不得混用。

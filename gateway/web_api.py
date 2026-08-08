@@ -1,5 +1,5 @@
 import time
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
@@ -17,6 +17,7 @@ from .profiles import (
     validate_profiles,
 )
 from .security import IssuedToken, hash_password, hash_token, issue_token, verify_password
+from .shell_policy import describe_shell_policy
 
 
 SESSION_COOKIE = "remote_gateway_session"
@@ -34,6 +35,10 @@ class NamedItem(BaseModel):
 class AgentUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=500)
+
+
+class ShellPolicyUpdate(BaseModel):
+    mode: Literal["off", "standard"]
 
 
 class AgentBundleRequest(BaseModel):
@@ -56,6 +61,11 @@ def _agent_view(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
     result["capabilities"] = profile_names(agent["profiles"])
     result["requires_reenrollment"] = not agent["profile_declarations"]
     result["version_status"] = agent_version_status(agent["version"])
+    result["shell_policy"] = (
+        describe_shell_policy(agent["shell_policy_mode"])
+        if "shell.v1" in agent["profiles"]
+        else None
+    )
     return result
 
 
@@ -291,6 +301,19 @@ def create_web_router(db: Database, settings: Settings, hub: AgentHub) -> APIRou
             raise HTTPException(status_code=404, detail="Agent 不存在")
         agent = db.get_owned_agent(user["id"], agent_id)
         return {"agent": _agent_view(agent, hub)}
+
+    @router.patch("/agents/{agent_id}/shell-policy")
+    def update_agent_shell_policy(
+        agent_id: str, update: ShellPolicyUpdate, user: User
+    ) -> dict[str, Any]:
+        agent = db.get_owned_agent(user["id"], agent_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent 不存在")
+        if "shell.v1" not in agent["profiles"]:
+            raise HTTPException(status_code=422, detail="该 Agent 未声明 shell.v1")
+        db.update_agent_shell_policy(user["id"], agent_id, update.mode)
+        updated = db.get_owned_agent(user["id"], agent_id)
+        return {"agent": _agent_view(updated, hub)}
 
     @router.delete("/agents/{agent_id}", status_code=204)
     async def revoke_agent(agent_id: str, user: User) -> None:

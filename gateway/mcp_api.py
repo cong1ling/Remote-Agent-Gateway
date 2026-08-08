@@ -27,6 +27,7 @@ from .profiles import (
     validate_profile_result,
 )
 from .security import hash_token
+from .shell_policy import describe_shell_policy, evaluate_shell_command
 
 
 class DatabaseTokenVerifier:
@@ -54,7 +55,7 @@ def _current_user_id() -> str:
 
 
 def _agent_summary(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
-    return {
+    result = {
         "id": agent["id"],
         "name": agent["name"],
         "description": agent["description"],
@@ -66,6 +67,17 @@ def _agent_summary(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
         "version_status": agent_version_status(agent["version"]),
         "last_seen_at": agent["last_seen_at"],
     }
+    if "shell.v1" in agent["profiles"]:
+        result["shell_policy"] = describe_shell_policy(agent["shell_policy_mode"])
+    return result
+
+
+def _shell_runtime(agent: dict[str, Any]) -> dict[str, Any] | None:
+    for declaration in agent["profile_declarations"]:
+        if declaration.get("id") == "shell.v1":
+            runtime = declaration.get("runtime")
+            return runtime if isinstance(runtime, dict) else None
+    return None
 
 
 def _owned_profile_action(
@@ -102,7 +114,15 @@ async def _execute_profile_action(
     params: dict[str, Any],
     timeout: float,
 ) -> dict[str, Any]:
-    _owned_profile_action(db, user_id, agent_id, profile_id, action, mcp_tool)
+    agent = _owned_profile_action(db, user_id, agent_id, profile_id, action, mcp_tool)
+    if profile_id == "shell.v1" and action == "exec":
+        violation = evaluate_shell_command(
+            mode=agent["shell_policy_mode"],
+            runtime=_shell_runtime(agent),
+            command=str(params.get("command", "")),
+        )
+        if violation is not None:
+            raise ToolError(violation.tool_error())
     try:
         result = await hub.execute(agent_id, profile_id, action, params, timeout)
     except (AgentOfflineError, AgentCommandError) as exc:
@@ -124,6 +144,7 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             "调用任何 Agent 专属工具前，必须先对目标 agent_id 调用 get_agent_capabilities。"
             "只有能力详情中的 Profile Action 明确列出当前工具的 mcp_tool 时才能调用，"
             "网关会在调用时再次校验。workspace.v1 覆盖已有文件或 edit 前必须先读取文件版本。"
+            "若目标 Agent 启用了标准 Shell 拦截策略，部分系统级命令会在转发前被拒绝。"
         ),
         token_verifier=DatabaseTokenVerifier(db),
         auth=AuthSettings(
@@ -185,6 +206,7 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             "网关会再次校验。"
             "command 必须符合 get_agent_capabilities 返回的 Shell 方言。"
             "该能力拥有 Agent 所在系统账号的完整 Shell 权限。"
+            "目标 Agent 启用标准命令策略时，网关会在执行前拦截部分系统级高风险操作。"
         )
     )
     async def remote_exec(

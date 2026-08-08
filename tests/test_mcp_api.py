@@ -172,6 +172,57 @@ class McpApiTests(unittest.TestCase):
             ],
             MAX_CONCURRENT_REQUESTS_PER_AGENT,
         )
+        self.assertEqual(
+            response.json()["result"]["structuredContent"]["agent"]["shell_policy"]["mode"],
+            "off",
+        )
+
+    def test_standard_shell_policy_blocks_before_agent_dispatch(self) -> None:
+        enrollment = self.client.post(
+            "/api/enrollment-tokens", json={"name": "Protected Agent"}
+        ).json()["secret"]
+        hello = {
+            "v": 2,
+            "type": "hello",
+            "enrollment_token": enrollment,
+            "name": "Protected Agent",
+            "description": "",
+            "profiles": SHELL_DECLARATIONS,
+            "version": {
+                "agent_version": CURRENT_AGENT_VERSION,
+                "core_version": CURRENT_CORE_VERSION,
+                "protocol_version": 2,
+                "build_id": "mcp-policy-test",
+            },
+        }
+        headers = {**self.base_headers, "Authorization": f"Bearer {self.secret}"}
+        with self.client.websocket_connect("/ws/agent") as websocket:
+            websocket.send_json(hello)
+            agent_id = websocket.receive_json()["agent_id"]
+            configured = self.client.patch(
+                f"/api/agents/{agent_id}/shell-policy", json={"mode": "standard"}
+            )
+            self.assertEqual(configured.status_code, 200, configured.text)
+            response = self.client.post(
+                "/mcp/",
+                headers=headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "remote_exec",
+                        "arguments": {
+                            "agent_id": agent_id,
+                            "command": "Format-Volume -DriveLetter C",
+                        },
+                    },
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()["result"]
+        self.assertTrue(result["isError"])
+        self.assertIn("command_blocked [disk_management]", result["content"][0]["text"])
 
 
 if __name__ == "__main__":

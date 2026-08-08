@@ -119,6 +119,7 @@ class WebApiTests(unittest.TestCase):
             self.assertFalse(agents[0]["requires_reenrollment"])
             self.assertEqual(agents[0]["version"], AGENT_VERSION)
             self.assertEqual(agents[0]["version_status"], "current")
+            self.assertEqual(agents[0]["shell_policy"]["mode"], "off")
             details = self.client.get(f"/api/agents/{agents[0]['id']}").json()["agent"]
             self.assertEqual(details["profile_details"][0]["runtime"]["dialect"], "powershell")
             action = details["profile_details"][0]["actions"][0]
@@ -127,6 +128,17 @@ class WebApiTests(unittest.TestCase):
                 [field["name"] for field in action["returns"]],
                 ["stdout", "stderr", "exit_code"],
             )
+
+            updated = self.client.patch(
+                f"/api/agents/{agents[0]['id']}/shell-policy", json={"mode": "standard"}
+            )
+            self.assertEqual(updated.status_code, 200, updated.text)
+            self.assertEqual(updated.json()["agent"]["shell_policy"]["mode"], "standard")
+
+            invalid = self.client.patch(
+                f"/api/agents/{agents[0]['id']}/shell-policy", json={"mode": "strict"}
+            )
+            self.assertEqual(invalid.status_code, 422)
 
         with self.client.websocket_connect("/ws/agent") as websocket:
             websocket.send_json(hello)

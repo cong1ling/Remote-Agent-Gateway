@@ -112,6 +112,11 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(agent["profiles"], ["shell.v1"])
         self.assertEqual(agent["profile_declarations"], SHELL_DECLARATIONS)
         self.assertEqual(agent["version"], AGENT_VERSION)
+        self.assertEqual(agent["shell_policy_mode"], "off")
+        self.assertTrue(self.db.update_agent_shell_policy(owner["id"], agent_id, "standard"))
+        self.assertEqual(
+            self.db.get_owned_agent(owner["id"], agent_id)["shell_policy_mode"], "standard"
+        )
         self.assertIsNone(self.db.get_owned_agent(other["id"], agent_id))
         self.assertEqual(self.db.list_agents(other["id"]), [])
         self.assertTrue(self.db.revoke_agent(owner["id"], agent_id))
@@ -165,6 +170,7 @@ class DatabaseTests(unittest.TestCase):
         with closing(sqlite3.connect(path)) as connection:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(agents)")}
         self.assertIn("version_json", columns)
+        self.assertIn("shell_policy_mode", columns)
 
     def test_revoked_mcp_key_cannot_authenticate(self) -> None:
         user = self.create_user()

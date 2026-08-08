@@ -162,6 +162,26 @@ function agentCapabilitiesButton(agent) {
   return `<button class="capability-summary" data-agent-capabilities="${escapeHtml(agent.id)}" type="button" aria-label="查看 ${escapeHtml(agent.name)} 的能力">${count} 个能力</button>`;
 }
 
+function openShellPolicyForm(agentId) {
+  const agent = state.agents.find((item) => item.id === agentId);
+  const policy = agent?.shell_policy;
+  if (!agent || !policy) return;
+  $("#agent-capabilities-dialog").close();
+  const options = (policy.modes || []).map((option) => `<label class="profile-option policy-option"><input type="radio" name="mode" value="${escapeHtml(option.id)}" ${option.id === policy.mode ? "checked" : ""}><span><strong>${escapeHtml(option.name)}</strong><span>${escapeHtml(option.description)}</span></span></label>`).join("");
+  const rules = (policy.rules || []).map((rule) => `<li><strong>${escapeHtml(rule.name)}</strong><span>${escapeHtml(rule.description)}</span></li>`).join("");
+  openForm({
+    eyebrow: `${agent.name} · shell.v1`,
+    title: "配置命令拦截",
+    submit: "保存策略",
+    fields: `<p class="policy-form-note">标准拦截不限制普通文件删除、项目修改、依赖安装、构建或测试。</p><div class="policy-options">${options}</div><section class="policy-rules"><h3>标准拦截范围</h3><ul>${rules}</ul></section>`,
+    onSubmit: async (data) => {
+      await api(`/agents/${agentId}/shell-policy`, { method: "PATCH", body: JSON.stringify({ mode: data.get("mode") }) });
+      await loadAll(true);
+      toast("命令策略已更新");
+    },
+  });
+}
+
 function openAgentCapabilitiesDialog(agentId) {
   const agent = state.agents.find((item) => item.id === agentId);
   if (!agent) return;
@@ -171,10 +191,14 @@ function openAgentCapabilitiesDialog(agentId) {
     const profile = state.catalog.find((item) => item.id === profileId);
     const runtime = profileRuntimeLabel(declarationsById.get(profileId));
     const actions = (profile?.actions || []).map((action) => `<span><code>${escapeHtml(action.name)}</code>${action.mcp_tool ? ` <small>→</small> <code>${escapeHtml(action.mcp_tool)}</code>` : ""}</span>`).join("");
+    const policy = profileId === "shell.v1" && agent.shell_policy
+      ? `<section class="shell-policy"><div><strong>命令拦截</strong><span>${escapeHtml(agent.shell_policy.mode === "standard" ? "标准拦截" : "关闭")}</span></div><button class="secondary" data-shell-policy="${escapeHtml(agent.id)}" type="button">配置</button></section>`
+      : "";
     return `<article class="agent-capability-item">
       <header><div><h3>${escapeHtml(profile?.name || profileId)}</h3><code>${escapeHtml(profileId)}</code></div>${profile ? `<button class="secondary" data-profile-details="${escapeHtml(profileId)}" type="button">查看协议</button>` : ""}</header>
       <p>${escapeHtml(runtime || "未声明运行时详情")}</p>
       <div class="agent-capability-actions">${actions || "<span>暂无 Action 映射</span>"}</div>
+      ${policy}
     </article>`;
   }).join("");
   $("#agent-capabilities-title").textContent = agent.name;
@@ -410,6 +434,11 @@ function bindEvents() {
     const target = event.target;
     const capabilitiesButton = target.closest("[data-agent-capabilities]");
     if (capabilitiesButton) openAgentCapabilitiesDialog(capabilitiesButton.dataset.agentCapabilities);
+    const shellPolicyButton = target.closest("[data-shell-policy]");
+    if (shellPolicyButton) {
+      openShellPolicyForm(shellPolicyButton.dataset.shellPolicy);
+      return;
+    }
     const profileButton = target.closest("[data-profile-details]");
     if (profileButton) {
       const capabilitiesDialog = $("#agent-capabilities-dialog");

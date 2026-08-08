@@ -86,6 +86,8 @@ class Database:
                     description TEXT NOT NULL DEFAULT '',
                     profiles_json TEXT NOT NULL,
                     version_json TEXT NOT NULL DEFAULT '{}',
+                    shell_policy_mode TEXT NOT NULL DEFAULT 'off'
+                        CHECK (shell_policy_mode IN ('off', 'standard')),
                     credential_prefix TEXT NOT NULL,
                     credential_hash TEXT NOT NULL UNIQUE,
                     created_at INTEGER NOT NULL,
@@ -115,6 +117,10 @@ class Database:
             if "version_json" not in agent_columns:
                 connection.execute(
                     "ALTER TABLE agents ADD COLUMN version_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            if "shell_policy_mode" not in agent_columns:
+                connection.execute(
+                    "ALTER TABLE agents ADD COLUMN shell_policy_mode TEXT NOT NULL DEFAULT 'off'"
                 )
 
     @staticmethod
@@ -338,7 +344,7 @@ class Database:
             row = connection.execute(
                 """
                 SELECT id, user_id, name, description, profiles_json, version_json,
-                       created_at, last_seen_at
+                       shell_policy_mode, created_at, last_seen_at
                 FROM agents
                 WHERE id = ? AND credential_hash = ? AND revoked_at IS NULL
                 """,
@@ -367,6 +373,8 @@ class Database:
         result["profiles"] = [declaration["id"] for declaration in declarations]
         raw_version = json.loads(result.pop("version_json"))
         result["version"] = raw_version if isinstance(raw_version, dict) else {}
+        mode = result.get("shell_policy_mode")
+        result["shell_policy_mode"] = mode if mode in {"off", "standard"} else "off"
         return result
 
     def update_agent_runtime(
@@ -399,7 +407,7 @@ class Database:
             rows = connection.execute(
                 """
                 SELECT id, user_id, name, description, profiles_json, version_json,
-                       created_at, last_seen_at, revoked_at
+                       shell_policy_mode, created_at, last_seen_at, revoked_at
                 FROM agents
                 WHERE user_id = ? AND revoked_at IS NULL
                 ORDER BY created_at DESC
@@ -413,7 +421,7 @@ class Database:
             row = connection.execute(
                 """
                 SELECT id, user_id, name, description, profiles_json, version_json,
-                       created_at, last_seen_at, revoked_at
+                       shell_policy_mode, created_at, last_seen_at, revoked_at
                 FROM agents WHERE id = ? AND user_id = ? AND revoked_at IS NULL
                 """,
                 (agent_id, user_id),
@@ -428,6 +436,21 @@ class Database:
                 WHERE id = ? AND user_id = ? AND revoked_at IS NULL
                 """,
                 (name, description, agent_id, user_id),
+            )
+        return cursor.rowcount > 0
+
+    def update_agent_shell_policy(
+        self, user_id: str, agent_id: str, mode: str
+    ) -> bool:
+        if mode not in {"off", "standard"}:
+            raise ValueError("shell_policy_mode 无效")
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE agents SET shell_policy_mode = ?
+                WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+                """,
+                (mode, agent_id, user_id),
             )
         return cursor.rowcount > 0
 

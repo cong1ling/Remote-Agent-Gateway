@@ -178,6 +178,18 @@ dialog::backdrop { background: rgba(12, 20, 17, .5); }
 .agent-capability-actions > span { padding: 5px 7px; color: #4f5f58; background: var(--soft); font-size: 10px; }
 .agent-capability-actions code { color: #34566f; font-size: 10px; }
 .agent-capability-actions small { color: #89938f; }
+.shell-policy { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.shell-policy > div { min-width: 0; display: grid; gap: 3px; }
+.shell-policy strong { font-size: 12px; }
+.shell-policy span { color: var(--muted); font-size: 11px; }
+.shell-policy button { min-height: 30px; padding: 5px 9px; flex: 0 0 auto; font-size: 11px; }
+.policy-form-note { margin: 18px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.policy-options { display: grid; gap: 8px; }
+.policy-rules { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.policy-rules h3 { margin: 0 0 10px; font-size: 12px; }
+.policy-rules ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.policy-rules li { display: grid; grid-template-columns: minmax(92px, auto) minmax(0, 1fr); gap: 10px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.policy-rules strong { color: var(--ink); font-size: 11px; }
 .protocol-detail { min-height: 0; flex: 1 1 auto; margin-top: 20px; padding-right: 5px; overflow-y: auto; }
 .protocol-lead { padding: 16px; border-left: 3px solid var(--blue); background: #eef4fa; }
 .protocol-lead p { margin: 0; color: #334c63; font-size: 13px; line-height: 1.65; }
@@ -246,4 +258,5 @@ dialog::backdrop { background: rgba(12, 20, 17, .5); }
   .mcp-invocation small { width: 100%; margin-left: 0; }
   .profile-dialog { padding: 20px; }
   .capabilities-dialog { padding: 20px; }
+  .policy-rules li { grid-template-columns: 1fr; gap: 2px; }
 }
