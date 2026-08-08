@@ -148,6 +148,7 @@ list_agents
   - `null`：只允许创建不存在的文件，已存在则 `conflict`。
   - SHA-256：只允许覆盖内容版本完全匹配的现有文件。
   - 缺少字段、存在性不符或版本不符均拒绝；不提供 `force` 无条件覆盖。
+- 网关必须拒绝 Agent 0.2.0 及更早版本声明 `workspace.v1`；兼容检查必须发生在 Enrollment Token 消费和 Hub 注册之前。
 - `edit` 必须携带最近一次 `read` 返回的 SHA-256，且 `old_text` 必须精确匹配一次；返回 diff、新 SHA 和首个修改行。
 - write/edit 使用同目录临时文件和原子替换，避免半写；网络断线仍可能出现“已执行但响应丢失”，调用方应重新 read 验证。
 - 当前不为 `workspace.v1` 增加 `list`。远程编码推荐组合 `shell.v1 + workspace.v1`：Shell 负责目录发现、搜索、Git、构建和测试，Workspace 负责可靠内容操作。workspace-only 只承诺已知路径操作。

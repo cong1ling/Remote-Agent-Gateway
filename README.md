@@ -89,11 +89,22 @@ Agent 会在注册与重连握手中上报操作系统、方言和可执行文�
 
 Agent WebSocket 协议当前为 v2，不兼容早期未携带结构化 Profile 运行时信息的脚本；请重新从工作台组装 Agent。
 
+### `workspace.v1` 契约
+
+`workspace.v1` 使用 Agent 启动时指定的 `--workdir` 作为工作目录，只接受 `/` 分隔的相对路径和 UTF-8 文本。它提供 `read`、`write`、`edit` 三个固定 Action，不是上传下载系统，也不是 Shell 权限沙箱。
+
+- 单文件最多 8 MiB；单次读取最多 2000 行或 50 KiB；单次写入最多 2 MiB。
+- `read` 返回整个文件的 SHA-256；内容范围受限时通过 `truncated`、`lines` 和 `total_lines` 声明。
+- `write.expected_sha256` 必须显式提供：传 `null` 只允许创建不存在的文件；传最近一次读取的 SHA-256 才允许覆盖匹配版本；不提供无条件 `force` 覆盖。
+- `edit` 必须携带最近一次 `read` 的 SHA-256，且 `old_text` 必须在文件中精确匹配一次。
+- 当前 `workspace.v1` 要求 Agent `0.2.1` 或更高版本；旧 Agent 会在注册或重连时收到重新组装提示。
+- 远程编码场景推荐同时组装 `shell.v1`：Shell 负责目录发现、搜索、Git、构建和测试，Workspace 负责结构化文件读写。
+
 ### Agent 版本信息
 
 每个 Agent 在握手时上报以下版本信息，网关会持久化并显示版本状态：
 
-- `agent_version`：Agent 发布版本，例如 `0.1.0`
+- `agent_version`：Agent 发布版本，例如 `0.2.1`
 - `core_version`：Core 数据与行为版本
 - `protocol_version`：Agent WebSocket 协议版本
 - `build_id`：工作台每次组装生成的唯一构建 ID；源码运行使用 `source-dev`

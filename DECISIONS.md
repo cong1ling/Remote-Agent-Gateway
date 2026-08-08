@@ -221,3 +221,11 @@
 - **替代方案**：继续自动换行所有标签；只显示前两个并使用 `+N`；用悬浮提示展示；把能力详情扩展为独立页面。
 - **取舍**：用户需要多点击一次才能看到具体 Profile，但 Agent 卡片在任意能力数量下保持稳定，弹窗仍完整保留能力名称、运行时、Action 映射和协议入口。
 - **影响**：仅影响概览和远程 Agent 列表的前端展示，不改变 Profile、Agent 协议、MCP 工具或数据库。
+
+## 2026-08-08：Profile 契约声明最低兼容 Agent 版本
+
+- **决策**：网关 Profile Registry 可以为安全敏感契约声明 `minimum_agent_version`，Agent 在首次注册或重连进入数据库与 Hub 前必须通过 Profile 与 Agent 版本的交叉校验。`workspace.v1` 最低要求官方 Agent 0.2.1；未声明最低版本的 `shell.v1` 保持原有兼容范围。
+- **原因**：0.2.1 将 `workspace.v1/write` 修正为显式创建或按 SHA 覆盖，但旧 0.2.0 Handler 会把 `expected_sha256=null` 当成无条件覆盖。仅在网页显示“需要升级”不能阻止网关把新契约请求路由给旧实现，必须在连接边界拒绝不兼容声明。
+- **替代方案**：允许旧 Agent 在线并只在 MCP write 时按版本拦截；升级整个 WebSocket 协议并拒绝全部旧 Agent；发布 `workspace.v2`；信任用户看到升级提示后自行更新。
+- **取舍**：旧 Workspace Agent 在更新前无法继续使用 read/edit 等仍兼容的 Action，但避免同一 Profile ID 同时存在两套相互冲突的 write 语义。纯 Shell 旧 Agent 不受影响，检查逻辑保持由 Registry 数据驱动。
+- **影响**：旧 Workspace Agent 重连会收到明确的重新组装提示，Enrollment Token 不会在兼容检查失败时被消费；Profile Catalog、能力详情和网页协议窗口会公开最低 Agent 版本。

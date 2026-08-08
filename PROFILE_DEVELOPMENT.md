@@ -70,6 +70,8 @@ remote_agent/profiles/
 
 网关 `gateway/profiles.py` 是 AI 可见协议的来源，维护名称、说明、Action、参数、返回值、错误、限制、runtime 契约和固定 `mcp_tool`。
 
+安全语义发生破坏性修正且仍沿用未发布的 Profile ID 时，Registry 必须声明最低兼容 Agent 版本，并在首次注册和重连进入 Hub 前拒绝旧实现；网页与能力详情同步暴露该要求。不能只显示升级提示后继续向旧 Handler 路由新契约请求。
+
 远程 Agent Registry 只维护可执行实现 Factory。两边共享 Profile ID、Action 名称和协议语义，但 Agent 不依赖完整网关代码，以便未来使用其他语言实现。
 
 每个对 AI 开放的 Action 必须映射到一个语义明确的固定 MCP 工具。AI 的调用顺序是：

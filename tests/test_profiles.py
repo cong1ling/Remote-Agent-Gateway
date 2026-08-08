@@ -3,12 +3,69 @@ from __future__ import annotations
 import unittest
 
 from gateway.profiles import (
+    validate_profile_agent_compatibility,
     validate_profile_declarations,
     validate_profile_result,
 )
 
 
 class ProfileContractTests(unittest.TestCase):
+    def test_profile_minimum_agent_version_is_enforced(self) -> None:
+        workspace = validate_profile_declarations(
+            [
+                {
+                    "id": "workspace.v1",
+                    "runtime": {
+                        "scope": "workdir",
+                        "path_format": "relative-posix",
+                        "encoding": "utf-8",
+                        "max_file_bytes": 8 * 1024 * 1024,
+                    },
+                }
+            ]
+        )
+        with self.assertRaisesRegex(ValueError, "需要 Agent 0.2.1"):
+            validate_profile_agent_compatibility(
+                workspace,
+                {
+                    "agent_version": "0.2.0",
+                    "core_version": 5,
+                    "protocol_version": 2,
+                    "build_id": "old-workspace",
+                },
+            )
+        validate_profile_agent_compatibility(
+            workspace,
+            {
+                "agent_version": "0.2.1",
+                "core_version": 5,
+                "protocol_version": 2,
+                "build_id": "current-workspace",
+            },
+        )
+
+        shell = validate_profile_declarations(
+            [
+                {
+                    "id": "shell.v1",
+                    "runtime": {
+                        "os": "windows",
+                        "dialect": "powershell",
+                        "executable": "powershell.exe",
+                    },
+                }
+            ]
+        )
+        validate_profile_agent_compatibility(
+            shell,
+            {
+                "agent_version": "0.1.0",
+                "core_version": 1,
+                "protocol_version": 2,
+                "build_id": "old-shell",
+            },
+        )
+
     def test_shell_declaration_requires_known_runtime_dialect(self) -> None:
         declarations = validate_profile_declarations(
             [

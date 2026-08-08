@@ -24,6 +24,17 @@ SHELL_DECLARATIONS = [
         },
     }
 ]
+WORKSPACE_DECLARATIONS = [
+    {
+        "id": "workspace.v1",
+        "runtime": {
+            "scope": "workdir",
+            "path_format": "relative-posix",
+            "encoding": "utf-8",
+            "max_file_bytes": 8 * 1024 * 1024,
+        },
+    }
+]
 AGENT_VERSION = {
     "agent_version": CURRENT_AGENT_VERSION,
     "core_version": CURRENT_CORE_VERSION,
@@ -158,6 +169,9 @@ class WebApiTests(unittest.TestCase):
             profile["limits"]["max_concurrent_requests_per_agent"],
             MAX_CONCURRENT_REQUESTS_PER_AGENT,
         )
+        profiles = self.client.get("/api/profile-catalog").json()["profiles"]
+        workspace = next(item for item in profiles if item["id"] == "workspace.v1")
+        self.assertEqual(workspace["minimum_agent_version"], "0.2.1")
 
     def test_old_agent_protocol_is_rejected_with_upgrade_message(self) -> None:
         self.register()
@@ -194,6 +208,40 @@ class WebApiTests(unittest.TestCase):
             )
             error = websocket.receive_json()
         self.assertIn("缺少版本信息", error["error"])
+
+    def test_old_workspace_agent_is_rejected_before_token_is_consumed(self) -> None:
+        self.register()
+        created = self.client.post(
+            "/api/enrollment-tokens", json={"name": "Old Workspace Agent"}
+        )
+        secret = created.json()["secret"]
+        hello = {
+            "v": 2,
+            "type": "hello",
+            "enrollment_token": secret,
+            "name": "Workspace Agent",
+            "description": "",
+            "profiles": WORKSPACE_DECLARATIONS,
+            "version": {
+                "agent_version": "0.2.0",
+                "core_version": 5,
+                "protocol_version": 2,
+                "build_id": "old-workspace",
+            },
+        }
+        with self.client.websocket_connect("/ws/agent") as websocket:
+            websocket.send_json(hello)
+            error = websocket.receive_json()
+        self.assertEqual(error["type"], "error")
+        self.assertIn("workspace.v1 需要 Agent 0.2.1", error["error"])
+        self.assertIn("重新从工作台组装", error["error"])
+
+        hello["version"]["agent_version"] = CURRENT_AGENT_VERSION
+        hello["version"]["build_id"] = "current-workspace"
+        with self.client.websocket_connect("/ws/agent") as websocket:
+            websocket.send_json(hello)
+            registered = websocket.receive_json()
+        self.assertEqual(registered["type"], "registered")
 
     def test_agent_is_hidden_from_another_user(self) -> None:
         self.register()

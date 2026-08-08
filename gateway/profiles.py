@@ -6,6 +6,8 @@ from typing import Any
 
 from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
+from .agent_protocol import version_tuple
+
 SHELL_MAX_CAPTURE_BYTES = 2 * 1024 * 1024
 SHELL_TRUNCATION_MARKER = "\n[output truncated by remote agent]\n"
 WORKSPACE_MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -135,6 +137,7 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
             "在 Agent 启动时指定的工作目录内，以 UTF-8 文本契约读取、整体写入和精确编辑文件。"
         ),
         "status": "stable",
+        "minimum_agent_version": "0.2.1",
         "implementations": {
             "python": {
                 "source": "workspace_v1",
@@ -390,6 +393,25 @@ def profile_ids(declarations: list[dict[str, Any]]) -> list[str]:
     return [declaration["id"] for declaration in declarations]
 
 
+def validate_profile_agent_compatibility(
+    declarations: list[dict[str, Any]], version: dict[str, Any]
+) -> None:
+    agent_version = version_tuple(version.get("agent_version"))
+    if agent_version is None:
+        raise ValueError("Agent agent_version 无效")
+    for declaration in declarations:
+        profile_id = declaration["id"]
+        minimum = PROFILE_REGISTRY[profile_id].get("minimum_agent_version")
+        if not isinstance(minimum, str):
+            continue
+        minimum_version = version_tuple(minimum)
+        if minimum_version is None:
+            raise RuntimeError(f"Profile {profile_id} 的最低 Agent 版本配置无效")
+        if agent_version < minimum_version:
+            raise ValueError(
+                f"{profile_id} 需要 Agent {minimum} 或更高版本；"
+                f"当前版本为 {version['agent_version']}，请重新从工作台组装 Agent"
+            )
 def describe_profile_declarations(
     declarations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -421,6 +443,7 @@ def public_profile_catalog() -> list[dict[str, Any]]:
                 "name": definition["name"],
                 "description": definition["description"],
                 "status": definition["status"],
+                "minimum_agent_version": definition.get("minimum_agent_version"),
                 "runtimes": sorted(definition["implementations"]),
                 "actions": deepcopy(definition["actions"]),
                 "runtime_contract": deepcopy(definition.get("runtime_contract", {})),

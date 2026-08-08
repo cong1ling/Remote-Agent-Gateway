@@ -130,7 +130,7 @@ function openProfileDialog(profileId, returnAgentId = "") {
   $("#profile-dialog").dataset.returnAgentId = returnAgentId;
   $("#profile-dialog-back").classList.toggle("hidden", !returnAgentId);
   $("#profile-dialog-body").innerHTML = `
-    <section class="protocol-lead"><p>${escapeHtml(profile.description)}</p><div>${(profile.runtimes || []).map((item) => `<span>${escapeHtml(item)} 实现</span>`).join("")}</div></section>
+    <section class="protocol-lead"><p>${escapeHtml(profile.description)}</p><div>${(profile.runtimes || []).map((item) => `<span>${escapeHtml(item)} 实现</span>`).join("")}${profile.minimum_agent_version ? `<span>Agent ≥ ${escapeHtml(profile.minimum_agent_version)}</span>` : ""}</div></section>
     <section class="protocol-section"><div class="protocol-section-head"><div><span>Runtime</span><h3>${runtimeTitle}</h3></div><p>${escapeHtml(runtime.selection || "Agent 必须声明具体运行时。")}</p></div><div class="schema-list">${runtimeFields}</div><div class="dialect-grid">${dialects}</div></section>
     ${actions}
     <section class="protocol-section"><div class="protocol-section-head"><div><span>Limits</span><h3>执行限制</h3></div></div><ul class="limit-list">${limitItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>`;

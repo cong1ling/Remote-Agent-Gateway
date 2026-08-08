@@ -9,7 +9,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 from .agent_hub import AgentConnection, AgentHub
 from .agent_protocol import AGENT_PROTOCOL_VERSION, validate_agent_version
 from .database import Database
-from .profiles import profile_ids, validate_profile_declarations
+from .profiles import (
+    profile_ids,
+    validate_profile_agent_compatibility,
+    validate_profile_declarations,
+)
 from .security import hash_token, issue_token
 
 
@@ -38,6 +42,7 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
         profile_declarations = validate_profile_declarations(hello.get("profiles"))
         profiles = profile_ids(profile_declarations)
         version = validate_agent_version(hello.get("version"), AGENT_PROTOCOL_VERSION)
+        validate_profile_agent_compatibility(profile_declarations, version)
 
         enrollment_token = hello.get("enrollment_token")
         if isinstance(enrollment_token, str) and enrollment_token:

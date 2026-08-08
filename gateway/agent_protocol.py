@@ -41,8 +41,8 @@ def agent_version_status(version: dict[str, Any]) -> str:
         return "unknown"
     if version.get("protocol_version") != AGENT_PROTOCOL_VERSION:
         return "incompatible"
-    agent_version = _version_tuple(version.get("agent_version"))
-    current_version = _version_tuple(CURRENT_AGENT_VERSION)
+    agent_version = version_tuple(version.get("agent_version"))
+    current_version = version_tuple(CURRENT_AGENT_VERSION)
     core_version = version.get("core_version")
     if agent_version is None or not isinstance(core_version, int):
         return "unknown"
@@ -53,7 +53,7 @@ def agent_version_status(version: dict[str, Any]) -> str:
     return "current"
 
 
-def _version_tuple(value: object) -> tuple[int, int, int] | None:
+def version_tuple(value: object) -> tuple[int, int, int] | None:
     if not isinstance(value, str) or not _VERSION_PATTERN.fullmatch(value):
         return None
     return tuple(int(part) for part in value.split("."))
