@@ -90,7 +90,7 @@ list_agents
 | Action | 固定 MCP 工具 | 语义 |
 | --- | --- | --- |
 | `read` | `remote_read_file` | 按行读取文本并返回整个文件的 SHA-256 |
-| `write` | `remote_write_file` | 原子地整体创建或覆盖文本，可选版本校验 |
+| `write` | `remote_write_file` | 按显式前置条件原子创建或覆盖文本 |
 | `edit` | `remote_edit_file` | 按已读取版本精确替换唯一一处文本并返回 diff |
 
 ### 工作目录与路径
@@ -117,7 +117,7 @@ list_agents
 - write 使用同目录临时文件和原子替换，防止半写文件。
 - read 返回整个文件的 SHA-256。
 - edit 强制携带最近一次 read 得到的 `expected_sha256`；版本不一致返回 `conflict`。
-- write 可选 `expected_sha256`；相同内容的重复写返回 `changed=false`。
+- write 必须显式携带 `expected_sha256`：`null` 只允许新建，SHA-256 只允许覆盖完全匹配的现有版本；不提供无条件覆盖。
 - 网络断线可能产生“本地已执行但响应丢失”，系统不承诺恰好执行一次；调用方应重新 read 验证状态。
 - 不引入 CRDT、分布式锁、离线合并、网关文件缓存或请求合并。
 
