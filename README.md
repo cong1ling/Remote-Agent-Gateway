@@ -2,7 +2,7 @@
 
 > 一个 MCP 入口，连接你散落在任何地方的设备能力。
 
-[![Version](https://img.shields.io/badge/version-0.2.1-2f6feb)](https://github.com/zshs000/Remote-Agent-Gateway/releases)
+[![Version](https://img.shields.io/badge/version-0.2.2-2f6feb)](https://github.com/zshs000/Remote-Agent-Gateway/releases)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776ab)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-0f766e)](LICENSE)
 
@@ -219,7 +219,7 @@ docker compose up -d --build
 
 | 组件 | 版本 |
 |---|---|
-| Remote Agent | `0.2.1` |
+| Remote Agent | `0.2.2` |
 | Agent Core | `5` |
 | WebSocket Protocol | `2` |
 
