@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import platform
+import ssl
 import socket
 import sys
 from typing import Any
@@ -232,16 +233,23 @@ class RemoteAgent:
                 delay = RECONNECT_MIN_SECONDS
             except FatalAgentError:
                 raise
+            except ssl.SSLCertVerificationError as exc:
+                raise FatalAgentError(f"Gateway TLS 证书验证失败: {exc}") from exc
+            except websockets.InvalidURI as exc:
+                raise FatalAgentError(f"Gateway WebSocket 地址无效: {exc}") from exc
             except (
                 OSError,
                 TimeoutError,
-                websockets.ConnectionClosed,
+                websockets.WebSocketException,
                 json.JSONDecodeError,
             ) as exc:
                 print(f"连接中断: {exc}; {delay} 秒后重试", file=sys.stderr, flush=True)
             finally:
-                for task in list(self.running.values()):
+                tasks = list(self.running.values())
+                for task in tasks:
                     task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
                 self.running.clear()
                 self.request_profiles.clear()
             await asyncio.sleep(delay)

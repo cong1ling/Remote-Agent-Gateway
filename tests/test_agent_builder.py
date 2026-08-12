@@ -36,12 +36,15 @@ class AgentBuilderTests(unittest.TestCase):
                 self.assertFalse(any(name.endswith(".pyc") for name in names))
                 self.assertIn(f"{root}/.gitignore", names)
                 self.assertIn(f"{root}/github-actions.yml.example", names)
+                self.assertIn(f"{root}/remote-agent.service.example", names)
+                self.assertIn(f"{root}/Dockerfile.agent.example", names)
+                self.assertIn(f"{root}/compose.agent.yml.example", names)
                 manifest = json.loads(
                     archive.read(f"{root}/remote_agent/manifest.json").decode("utf-8")
                 )
         self.assertEqual(manifest["profiles"], ["shell.v1"])
-        self.assertEqual(manifest["agent_version"], "0.2.2")
-        self.assertEqual(manifest["core_version"], 5)
+        self.assertEqual(manifest["agent_version"], "0.2.3")
+        self.assertEqual(manifest["core_version"], 6)
         self.assertEqual(manifest["build_id"], "12345678-1234-1234-1234-123456789012")
         self.assertEqual(manifest["agent"]["name"], "GPU Notebook")
         self.assertEqual(manifest["agent"]["description"], "模型训练环境")
@@ -94,6 +97,19 @@ class AgentBuilderTests(unittest.TestCase):
         self.assertIn("--config", readme)
         self.assertIn("REMOTE_AGENT_CONFIG_B64", readme)
         self.assertIn("github-actions.yml.example", readme)
+        self.assertIn("--workdir limits workspace.v1", readme)
+        self.assertIn("NOT a shell sandbox", readme)
+        self.assertIn("Standard local user", readme)
+        self.assertIn("New-LocalUser", readme)
+        self.assertIn("icacls", readme)
+        self.assertIn("Do not add this account to Administrators", readme)
+        self.assertIn("useradd --system", readme)
+        self.assertIn("sudo -u remote-agent", readme)
+        self.assertIn("docker compose -f compose.agent.yml.example run --rm", readme)
+        self.assertIn(
+            "--config /var/lib/remote-agent/config.json --workdir /workspace",
+            readme,
+        )
 
     def test_bundle_includes_guarded_github_actions_template(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -120,6 +136,30 @@ class AgentBuilderTests(unittest.TestCase):
         self.assertIn("--config-env REMOTE_AGENT_CONFIG_B64", workflow)
         self.assertIn(root, workflow)
         self.assertIn(".agent/", gitignore)
+
+    def test_bundle_includes_least_privilege_service_and_container_templates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            builder = PythonAgentBuilder(Path(directory))
+            path, filename = builder.build(
+                bundle_id="12345678-1234-1234-1234-123456789012",
+                name="Production Agent",
+                description="",
+                profiles=["shell.v1"],
+            )
+            with zipfile.ZipFile(path) as archive:
+                root = filename.removesuffix(".zip")
+                systemd = archive.read(f"{root}/remote-agent.service.example").decode()
+                dockerfile = archive.read(f"{root}/Dockerfile.agent.example").decode()
+                compose = archive.read(f"{root}/compose.agent.yml.example").decode()
+
+        self.assertIn("User=remote-agent", systemd)
+        self.assertIn("NoNewPrivileges=true", systemd)
+        self.assertIn("CapabilityBoundingSet=", systemd)
+        self.assertIn("ReadWritePaths=/var/lib/remote-agent /srv/remote-agent-work", systemd)
+        self.assertIn("USER 10001:10001", dockerfile)
+        self.assertIn("read_only: true", compose)
+        self.assertIn("cap_drop:", compose)
+        self.assertIn("no-new-privileges:true", compose)
 
     def test_downloaded_bundle_launcher_is_runnable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

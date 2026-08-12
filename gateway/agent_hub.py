@@ -45,6 +45,7 @@ class AgentConnection:
 @dataclass(slots=True)
 class PendingRequest:
     agent_id: str
+    connection: AgentConnection
     future: asyncio.Future[dict[str, Any]]
 
 
@@ -58,6 +59,10 @@ class AgentHub:
         async with self._lock:
             previous = self._connections.get(connection.agent_id)
             self._connections[connection.agent_id] = connection
+            failed = []
+            if previous is not None and previous is not connection:
+                failed = self._remove_pending_for_connection(previous)
+        self._fail_pending(failed, "Agent 已在新的连接上线")
         if previous is not None and previous.websocket is not connection.websocket:
             try:
                 await previous.websocket.close(code=4001, reason="Agent 已在其他连接上线")
@@ -70,16 +75,24 @@ class AgentHub:
             if current is None or current.websocket is not websocket:
                 return
             self._connections.pop(agent_id, None)
-            failed = [
-                (request_id, pending)
-                for request_id, pending in self._pending.items()
-                if pending.agent_id == agent_id
-            ]
-            for request_id, _ in failed:
-                self._pending.pop(request_id, None)
-        for _, pending in failed:
+            failed = self._remove_pending_for_connection(current)
+        self._fail_pending(failed, "Agent 连接已断开")
+
+    def _remove_pending_for_connection(
+        self, connection: AgentConnection
+    ) -> list[PendingRequest]:
+        request_ids = [
+            request_id
+            for request_id, pending in self._pending.items()
+            if pending.connection is connection
+        ]
+        return [self._pending.pop(request_id) for request_id in request_ids]
+
+    @staticmethod
+    def _fail_pending(pending_requests: list[PendingRequest], message: str) -> None:
+        for pending in pending_requests:
             if not pending.future.done():
-                pending.future.set_exception(AgentOfflineError("Agent 连接已断开"))
+                pending.future.set_exception(AgentOfflineError(message))
 
     def is_online(self, agent_id: str) -> bool:
         return agent_id in self._connections
@@ -112,7 +125,11 @@ class AgentHub:
                     "Agent 当前忙碌；每台 Agent 最多同时执行 "
                     f"{MAX_CONCURRENT_REQUESTS_PER_AGENT} 个请求"
                 )
-            self._pending[request_id] = PendingRequest(agent_id=agent_id, future=future)
+            self._pending[request_id] = PendingRequest(
+                agent_id=agent_id,
+                connection=connection,
+                future=future,
+            )
 
         try:
             await connection.send(
@@ -127,17 +144,11 @@ class AgentHub:
             )
             message = await asyncio.wait_for(future, timeout=timeout + 5)
         except asyncio.TimeoutError as exc:
-            try:
-                await connection.send(
-                    {
-                        "v": AGENT_PROTOCOL_VERSION,
-                        "type": "cancel",
-                        "request_id": request_id,
-                    }
-                )
-            except Exception:
-                pass
+            await self._cancel_remote(connection, request_id)
             raise AgentCommandError("远程命令等待超时") from exc
+        except asyncio.CancelledError:
+            await self._cancel_remote(connection, request_id)
+            raise
         except (RuntimeError, OSError) as exc:
             raise AgentOfflineError("无法向 Agent 发送请求") from exc
         finally:
@@ -151,18 +162,35 @@ class AgentHub:
             raise AgentCommandError("Agent 返回了无效结果")
         return result
 
-    async def resolve(self, agent_id: str, message: dict[str, Any]) -> None:
+    async def _cancel_remote(self, connection: AgentConnection, request_id: str) -> None:
+        try:
+            await asyncio.shield(
+                connection.send(
+                    {
+                        "v": AGENT_PROTOCOL_VERSION,
+                        "type": "cancel",
+                        "request_id": request_id,
+                    }
+                )
+            )
+        except Exception:
+            pass
+
+    async def resolve(self, connection: AgentConnection, message: dict[str, Any]) -> None:
         request_id = message.get("request_id")
         if not isinstance(request_id, str):
             return
         pending = self._pending.get(request_id)
-        if pending is None or pending.agent_id != agent_id or pending.future.done():
+        if (
+            pending is None
+            or pending.connection is not connection
+            or pending.future.done()
+        ):
             return
         pending.future.set_result(message)
 
-    def record_pong(self, agent_id: str) -> None:
-        connection = self._connections.get(agent_id)
-        if connection is not None:
+    def record_pong(self, connection: AgentConnection) -> None:
+        if self._connections.get(connection.agent_id) is connection:
             connection.last_pong = time.monotonic()
 
     async def heartbeat(self, timeout: float = 60) -> None:

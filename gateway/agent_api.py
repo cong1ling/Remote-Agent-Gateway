@@ -95,10 +95,10 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
                 continue
             message_type = message.get("type")
             if message_type == "pong":
-                hub.record_pong(agent_id)
+                hub.record_pong(connection)
                 db.touch_agent(agent_id)
             elif message_type == "result":
-                await hub.resolve(agent_id, message)
+                await hub.resolve(connection, message)
     except (ValueError, asyncio.TimeoutError) as exc:
         await websocket.send_json(
             {"v": AGENT_PROTOCOL_VERSION, "type": "error", "error": str(exc)}

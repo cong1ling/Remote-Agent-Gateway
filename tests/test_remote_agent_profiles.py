@@ -5,7 +5,13 @@ import base64
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import websockets
+from websockets.http11 import Response
 
 from gateway.agent_protocol import (
     AGENT_PROTOCOL_VERSION,
@@ -65,8 +71,8 @@ class RemoteAgentProfileTests(unittest.TestCase):
         self.assertEqual(
             hello["version"],
             {
-                "agent_version": "0.2.2",
-                "core_version": 5,
+                "agent_version": "0.2.3",
+                "core_version": 6,
                 "protocol_version": 2,
                 "build_id": "profile-test",
             },
@@ -166,6 +172,34 @@ class RemoteAgentConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(websocket.messages[0]["request_id"], "overflow")
         self.assertFalse(websocket.messages[0]["ok"])
         self.assertIn("Agent 当前忙碌", websocket.messages[0]["error"])
+
+    async def test_temporary_websocket_handshake_failure_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            agent = RemoteAgent(
+                gateway_url="ws://example.test/ws/agent",
+                config_store=AgentConfig(Path(directory) / "config.json"),
+                enrollment_token="enroll_test",
+                name="test",
+                description="",
+                build_id="retry-test",
+                handlers=build_profile_handlers(["shell.v1"], Path(directory)),
+            )
+            agent.session = AsyncMock(
+                side_effect=[
+                    websockets.InvalidStatus(
+                        Response(503, "Service Unavailable", websockets.Headers())
+                    ),
+                    FatalAgentError("stop"),
+                ]
+            )
+            with patch("remote_agent.core.runtime.asyncio.sleep", new=AsyncMock()) as sleep:
+                with redirect_stderr(StringIO()) as stderr:
+                    with self.assertRaisesRegex(FatalAgentError, "stop"):
+                        await agent.run_forever()
+
+        self.assertEqual(agent.session.await_count, 2)
+        sleep.assert_awaited_once_with(2)
+        self.assertIn("2 秒后重试", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 > 一个 MCP 入口，连接你散落在任何地方的设备能力。
 
-[![Version](https://img.shields.io/badge/version-0.2.2-2f6feb)](https://github.com/zshs000/Remote-Agent-Gateway/releases)
+[![Version](https://img.shields.io/badge/version-0.2.3-2f6feb)](https://github.com/zshs000/Remote-Agent-Gateway/releases)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776ab)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-0f766e)](LICENSE)
 
@@ -201,6 +201,14 @@ python run.py --config-env REMOTE_AGENT_CONFIG_B64 --workdir .
 
 工作台 ZIP 包含手动触发的 GitHub Actions 示例。CI Agent 拥有 Job 本身的系统权限，不要在同一个 Agent Step 中注入无关生产秘钥，也不要通过不受信任的 `push` 或 `pull_request` 自动开放远程 Shell。
 
+### 最低权限运行
+
+`shell.v1` 始终继承启动 Agent 进程的操作系统账号权限。`--workdir` 只约束 `workspace.v1` 的结构化文件操作，**不是 Shell 沙箱**，也不能阻止 Shell 访问工作目录之外的位置。检测到 `root` 或 Windows 管理员运行 `shell.v1` 时，Agent 会打印醒目的安全警告，但为保持兼容不会拒绝启动。
+
+生产环境应从进程启动时就使用专用低权限账号：Linux 账号不得拥有 `sudo`/`wheel` 权限；Windows 使用不属于 Administrators 的本地标准用户；容器使用固定非 root UID、只读根文件系统并删除全部 Linux capabilities。只授予该账号访问 Agent 凭据目录和实际工作目录所需的最小读写权限。
+
+工作台生成的 ZIP 已包含 `remote-agent.service.example`、`Dockerfile.agent.example` 和 `compose.agent.yml.example`，分别提供 systemd 加固、非 root 镜像以及只读容器部署模板。模板中的路径需要按实际 Agent 目录和工作目录调整。
+
 ## 自行部署
 
 ```powershell
@@ -219,8 +227,8 @@ docker compose up -d --build
 
 | 组件 | 版本 |
 |---|---|
-| Remote Agent | `0.2.2` |
-| Agent Core | `5` |
+| Remote Agent | `0.2.3` |
+| Agent Core | `6` |
 | WebSocket Protocol | `2` |
 
 Agent 握手会上报发布版本、Core 版本、协议版本和唯一 `build_id`。网关会显示“当前版本”“需要升级”“协议不兼容”“高于网关版本”或“未知版本”。当前不提供自动更新器。

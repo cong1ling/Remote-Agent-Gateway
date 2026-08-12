@@ -58,6 +58,70 @@ jobs:
           --workdir "$GITHUB_WORKSPACE"
 """
 
+SYSTEMD_TEMPLATE = """[Unit]
+Description=Remote Agent Gateway device agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=remote-agent
+Group=remote-agent
+WorkingDirectory=/srv/remote-agent-work
+ExecStart=/opt/remote-agent/.venv/bin/python /opt/remote-agent/run.py --config /var/lib/remote-agent/config.json --workdir /srv/remote-agent-work
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/remote-agent /srv/remote-agent-work
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+AGENT_DOCKERFILE_TEMPLATE = """FROM python:3.12-slim
+
+RUN groupadd --gid 10001 remote-agent \\
+    && useradd --uid 10001 --gid remote-agent --create-home remote-agent
+WORKDIR /opt/remote-agent
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir -r requirements.txt
+COPY --chown=remote-agent:remote-agent . ./
+USER 10001:10001
+ENTRYPOINT [\"python\", \"run.py\"]
+CMD [\"--config\", \"/var/lib/remote-agent/config.json\", \"--workdir\", \"/workspace\"]
+"""
+
+AGENT_COMPOSE_TEMPLATE = """services:
+  remote-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent.example
+    restart: unless-stopped
+    user: \"10001:10001\"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - ./state:/var/lib/remote-agent
+      - ./workspace:/workspace
+"""
+
 
 class PythonAgentBuilder:
     runtime = "python"
@@ -126,6 +190,42 @@ class PythonAgentBuilder:
             "The CI secret is consumed and removed from the Agent process environment\n"
             "before shell commands can run. Never commit .agent/config.json, and do not\n"
             "run the same device credential in two places at the same time.\n"
+            "\n"
+            "Least-privilege production deployment\n"
+            "-------------------------------------\n"
+            "shell.v1 always inherits the operating-system account that starts this\n"
+            "process. --workdir limits workspace.v1 paths but is NOT a shell sandbox.\n"
+            "Never run a production shell Agent as root or Administrator.\n"
+            "\n"
+            "Linux: create an unprivileged remote-agent account with no sudo access,\n"
+            "make /opt/remote-agent read-only to it, and grant it access only to\n"
+            "/var/lib/remote-agent plus the intended workspace. Adapt and install\n"
+            "remote-agent.service.example after the first enrollment.\n"
+            "Example preparation commands (run as root):\n"
+            "   useradd --system --home /var/lib/remote-agent --shell /usr/sbin/nologin remote-agent\n"
+            "   install -d -o remote-agent -g remote-agent -m 0700 /var/lib/remote-agent\n"
+            "   install -d -o remote-agent -g remote-agent -m 0750 /srv/remote-agent-work\n"
+            "   chown -R root:root /opt/remote-agent && chmod -R go-w /opt/remote-agent\n"
+            "Run the enrollment command once with 'sudo -u remote-agent' and the\n"
+            "service template's --config/--workdir paths, then enable the service.\n"
+            "\n"
+            "Windows: create a dedicated Standard local user (not Administrators),\n"
+            "deny interactive use where policy permits, grant that user Read/Execute\n"
+            "on the Agent directory and Modify only on .agent plus the intended\n"
+            "workspace, then run the scheduled task or service as that user.\n"
+            "From an elevated PowerShell, create the account with New-LocalUser, then\n"
+            "use icacls to remove inherited broad access where appropriate and grant\n"
+            "'<computer>\\remote-agent:(OI)(CI)RX' on the Agent directory plus\n"
+            "'<computer>\\remote-agent:(OI)(CI)M' on .agent and the workspace.\n"
+            "Do not add this account to Administrators or Remote Desktop Users.\n"
+            "\n"
+            "Container: use Dockerfile.agent.example and compose.agent.yml.example.\n"
+            "They run as UID 10001 with a read-only root filesystem, all capabilities\n"
+            "dropped, and only state/workspace mounted writable. Before first start,\n"
+            "create state/workspace and make them writable by UID/GID 10001.\n"
+            "Enroll once with: docker compose -f compose.agent.yml.example run --rm\n"
+            "   remote-agent --config /var/lib/remote-agent/config.json --workdir /workspace\n"
+            "   --gateway wss://gateway.example/ws/agent --token <enrollment-token>\n"
         )
         github_actions = GITHUB_ACTIONS_TEMPLATE.replace("__AGENT_DIR__", archive_root)
 
@@ -141,6 +241,18 @@ class PythonAgentBuilder:
                 archive.writestr(
                     f"{archive_root}/github-actions.yml.example",
                     github_actions,
+                )
+                archive.writestr(
+                    f"{archive_root}/remote-agent.service.example",
+                    SYSTEMD_TEMPLATE,
+                )
+                archive.writestr(
+                    f"{archive_root}/Dockerfile.agent.example",
+                    AGENT_DOCKERFILE_TEMPLATE,
+                )
+                archive.writestr(
+                    f"{archive_root}/compose.agent.yml.example",
+                    AGENT_COMPOSE_TEMPLATE,
                 )
                 archive.writestr(
                     f"{archive_root}/remote_agent/manifest.json",

@@ -13,6 +13,7 @@ from remote_agent.core import (
     FatalAgentError,
     RemoteAgent,
     load_manifest,
+    privileged_shell_warning,
 )
 from remote_agent.profiles import build_profile_handlers
 
@@ -57,6 +58,9 @@ async def async_main(default_config: Path | None = None) -> None:
     if not workdir.is_dir():
         raise FatalAgentError(f"工作目录不存在: {workdir}")
     handlers = build_profile_handlers(manifest.profiles, workdir)
+    warning = privileged_shell_warning(manifest.profiles, workdir)
+    if warning:
+        print(warning, file=sys.stderr, flush=True)
     agent = RemoteAgent(
         gateway_url=gateway_url,
         config_store=config_store,

@@ -20,6 +20,13 @@ class FakeWebSocket:
         self.closed = True
 
 
+class SlowCancelWebSocket(FakeWebSocket):
+    async def send_json(self, message: dict[str, Any]) -> None:
+        if message.get("type") == "cancel":
+            await asyncio.sleep(0.01)
+        await super().send_json(message)
+
+
 class AgentHubTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.hub = AgentHub()
@@ -38,13 +45,13 @@ class AgentHubTests(unittest.IsolatedAsyncioTestCase):
         request_id = self.socket_a.messages[0]["request_id"]
 
         await self.hub.resolve(
-            "agent-b",
+            self.hub._connections["agent-b"],
             {"type": "result", "request_id": request_id, "ok": True, "result": {"stdout": "bad"}},
         )
         self.assertFalse(task.done())
 
         await self.hub.resolve(
-            "agent-a",
+            self.connection_a,
             {"type": "result", "request_id": request_id, "ok": True, "result": {"stdout": "ok"}},
         )
         self.assertEqual((await task)["stdout"], "ok")
@@ -61,7 +68,7 @@ class AgentHubTests(unittest.IsolatedAsyncioTestCase):
         await self.hub.unregister("agent-a", self.socket_a)
         request_b = self.socket_b.messages[0]["request_id"]
         await self.hub.resolve(
-            "agent-b",
+            self.hub._connections["agent-b"],
             {"type": "result", "request_id": request_b, "ok": True, "result": {"stdout": "b"}},
         )
 
@@ -110,14 +117,14 @@ class AgentHubTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         request_b = self.socket_b.messages[-1]["request_id"]
         await self.hub.resolve(
-            "agent-b",
+            self.hub._connections["agent-b"],
             {"type": "result", "request_id": request_b, "ok": True, "result": {}},
         )
         self.assertEqual(await other_agent, {})
 
         first_request = self.socket_a.messages[0]["request_id"]
         await self.hub.resolve(
-            "agent-a",
+            self.connection_a,
             {"type": "result", "request_id": first_request, "ok": True, "result": {}},
         )
         self.assertEqual(await tasks[0], {})
@@ -133,6 +140,54 @@ class AgentHubTests(unittest.IsolatedAsyncioTestCase):
         for task in [*tasks[1:], replacement]:
             task.cancel()
         await asyncio.gather(*tasks[1:], replacement, return_exceptions=True)
+
+    async def test_cancelling_caller_sends_cancel_to_remote_agent(self) -> None:
+        task = asyncio.create_task(
+            self.hub.execute("agent-a", "shell.v1", "exec", {"command": "long"}, 60)
+        )
+        await asyncio.sleep(0)
+        request_id = self.socket_a.messages[0]["request_id"]
+
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        self.assertEqual(
+            self.socket_a.messages[-1],
+            {"v": 2, "type": "cancel", "request_id": request_id},
+        )
+
+    async def test_cancelling_caller_waits_for_cancel_send_to_finish(self) -> None:
+        socket = SlowCancelWebSocket()
+        hub = AgentHub()
+        await hub.register(AgentConnection("slow", "user", socket))
+        task = asyncio.create_task(hub.execute("slow", "shell.v1", "exec", {}, 60))
+        await asyncio.sleep(0)
+
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        self.assertEqual([message["type"] for message in socket.messages], ["request", "cancel"])
+
+    async def test_replacing_connection_fails_old_pending_and_isolates_results(self) -> None:
+        task = asyncio.create_task(
+            self.hub.execute("agent-a", "shell.v1", "exec", {"command": "old"}, 60)
+        )
+        await asyncio.sleep(0)
+        request_id = self.socket_a.messages[0]["request_id"]
+        replacement_socket = FakeWebSocket()
+        replacement = AgentConnection("agent-a", "user-a", replacement_socket)
+
+        await self.hub.register(replacement)
+        await self.hub.resolve(
+            replacement,
+            {"type": "result", "request_id": request_id, "ok": True, "result": {}},
+        )
+
+        self.assertTrue(self.socket_a.closed)
+        with self.assertRaises(AgentOfflineError):
+            await task
 
 
 if __name__ == "__main__":
