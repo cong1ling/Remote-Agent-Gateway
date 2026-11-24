@@ -9,6 +9,7 @@ from pathlib import Path
 
 import remote_agent
 from remote_agent.core.version import AGENT_VERSION, CORE_VERSION
+from remote_agent.profiles.common.managed_contracts import BUILD_PROFILE, SERVICE_PROFILE
 
 from .profiles import PROFILE_REGISTRY, validate_profiles
 
@@ -88,6 +89,63 @@ ReadWritePaths=/var/lib/remote-agent /srv/remote-agent-work
 
 [Install]
 WantedBy=multi-user.target
+"""
+
+WINDOWS_TASK_TEMPLATE = r"""<?xml version="1.0"?>
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Remote Agent Gateway example for the current standard user</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+      <UserId>REPLACE_WITH_CURRENT_USER_SID</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="CurrentUser">
+      <UserId>REPLACE_WITH_CURRENT_USER_SID</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+  </Settings>
+  <Actions Context="CurrentUser">
+    <Exec>
+      <Command>C:\Users\REPLACE_WITH_ACCOUNT\Remote Agent\agent\.venv\Scripts\python.exe</Command>
+      <Arguments>"C:\Users\REPLACE_WITH_ACCOUNT\Remote Agent\agent\run.py" --config "C:\Users\REPLACE_WITH_ACCOUNT\Remote Agent\state\config.json" --workdir "C:\Users\REPLACE_WITH_ACCOUNT\Remote Agent\workspace"</Arguments>
+      <WorkingDirectory>C:\Users\REPLACE_WITH_ACCOUNT\Remote Agent\workspace</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"""
+
+MACOS_LAUNCH_AGENT_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.remote-agent.gateway</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/REPLACE_WITH_ACCOUNT/Remote Agent/agent/.venv/bin/python</string>
+    <string>/Users/REPLACE_WITH_ACCOUNT/Remote Agent/agent/run.py</string>
+    <string>--config</string>
+    <string>/Users/REPLACE_WITH_ACCOUNT/Remote Agent/state/config.json</string>
+    <string>--workdir</string>
+    <string>/Users/REPLACE_WITH_ACCOUNT/Remote Agent/workspace</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/REPLACE_WITH_ACCOUNT/Remote Agent/workspace</string>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
 """
 
 AGENT_DOCKERFILE_TEMPLATE = """FROM python:3.12-slim
@@ -197,6 +255,15 @@ class PythonAgentBuilder:
             "process. --workdir limits workspace.v1 paths but is NOT a shell sandbox.\n"
             "Never run a production shell Agent as root or Administrator.\n"
             "\n"
+            "Host startup templates are examples, not installers. Review all paths and\n"
+            "replace sample values with absolute paths for Python, run.py, config, and\n"
+            "the workspace. Keep Python, the launcher, and private config outside the workspace.\n"
+            "As the account that will run the Agent, enroll once in the foreground using\n"
+            "the gateway enrollment command with the template's --config and --workdir.\n"
+            "After the config is saved, stop the foreground Agent before enabling startup.\n"
+            "Later starts use the existing local config only. Never put an enrollment\n"
+            "token, account password, or the contents of config.json into a startup template.\n"
+            "\n"
             "Linux: create an unprivileged remote-agent account with no sudo access,\n"
             "make /opt/remote-agent read-only to it, and grant it access only to\n"
             "/var/lib/remote-agent plus the intended workspace. Adapt and install\n"
@@ -209,15 +276,18 @@ class PythonAgentBuilder:
             "Run the enrollment command once with 'sudo -u remote-agent' and the\n"
             "service template's --config/--workdir paths, then enable the service.\n"
             "\n"
-            "Windows: create a dedicated Standard local user (not Administrators),\n"
-            "deny interactive use where policy permits, grant that user Read/Execute\n"
-            "on the Agent directory and Modify only on .agent plus the intended\n"
-            "workspace, then run the scheduled task or service as that user.\n"
-            "From an elevated PowerShell, create the account with New-LocalUser, then\n"
-            "use icacls to remove inherited broad access where appropriate and grant\n"
-            "'<computer>\\remote-agent:(OI)(CI)RX' on the Agent directory plus\n"
-            "'<computer>\\remote-agent:(OI)(CI)M' on .agent and the workspace.\n"
-            "Do not add this account to Administrators or Remote Desktop Users.\n"
+            "Windows (current Standard local user): review remote-agent.task.xml.example.\n"
+            "Do not import as an administrator. Replace both UserId values with that user's\n"
+            "SID (shown by whoami /user). Keep the quotes around paths in Arguments.\n"
+            "After foreground enrollment, save a reviewed .xml copy\n"
+            "and import it in Task Scheduler if local policy permits. Keep 'Run only when\n"
+            "user is logged on' and leave 'Run with highest privileges' unchecked.\n"
+            "\n"
+            "macOS: review com.remote-agent.gateway.plist.example as the current standard\n"
+            "user. ProgramArguments are separate values, not a shell command. After\n"
+            "foreground enrollment, save the reviewed copy as a .plist matching its\n"
+            "Label under ~/Library/LaunchAgents to start it at that user's login.\n"
+            "Do not use sudo or install it as a system LaunchDaemon.\n"
             "\n"
             "Container: use Dockerfile.agent.example and compose.agent.yml.example.\n"
             "They run as UID 10001 with a read-only root filesystem, all capabilities\n"
@@ -227,6 +297,20 @@ class PythonAgentBuilder:
             "   remote-agent --config /var/lib/remote-agent/config.json --workdir /workspace\n"
             "   --gateway wss://gateway.example/ws/agent --token <enrollment-token>\n"
         )
+        if SERVICE_PROFILE in selected:
+            readme += (
+                "\nRegistered service profile\n"
+                "Pass --service-config with the device-local supervisor config outside --workdir,\n"
+                "both at enrollment and on later starts. Use a dedicated unprivileged account.\n"
+                "This profile accepts managed plans only, not direct MCP or shell requests.\n"
+            )
+        if BUILD_PROFILE in selected:
+            readme += (
+                "\nTrusted Python build verification profile\n"
+                "Pass --build-archive with the absolute path to your trusted, pre-provisioned source ZIP\n"
+                "outside --workdir at enrollment and on later starts. The runner is not an OS sandbox.\n"
+                "Run it using a dedicated low-privilege, network-isolated account or container.\n"
+            )
         github_actions = GITHUB_ACTIONS_TEMPLATE.replace("__AGENT_DIR__", archive_root)
 
         try:
@@ -245,6 +329,14 @@ class PythonAgentBuilder:
                 archive.writestr(
                     f"{archive_root}/remote-agent.service.example",
                     SYSTEMD_TEMPLATE,
+                )
+                archive.writestr(
+                    f"{archive_root}/remote-agent.task.xml.example",
+                    WINDOWS_TASK_TEMPLATE,
+                )
+                archive.writestr(
+                    f"{archive_root}/com.remote-agent.gateway.plist.example",
+                    MACOS_LAUNCH_AGENT_TEMPLATE,
                 )
                 archive.writestr(
                     f"{archive_root}/Dockerfile.agent.example",
@@ -267,6 +359,7 @@ class PythonAgentBuilder:
                 self._write_file(archive, self.package_root / "profiles" / "base.py", archive_root)
                 self._write_file(archive, self.package_root / "profiles" / "registry.py", archive_root)
                 self._write_tree(archive, self.package_root / "profiles" / "common", archive_root)
+                self._write_tree(archive, self.package_root / "runtimes", archive_root)
                 for profile_id in selected:
                     source_name = PROFILE_REGISTRY[profile_id]["implementations"][self.runtime]["source"]
                     source = self.package_root / "profiles" / source_name

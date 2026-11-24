@@ -12,6 +12,8 @@ class ProfileContext:
     """Runtime context shared by all Actions in one Profile."""
 
     workdir: Path
+    service_config: Path | None = None
+    build_archive: Path | None = None
 
 
 class ActionHandler(ABC):
@@ -31,6 +33,7 @@ class ActionHandler(ABC):
 
 class ProfileHandler(ABC):
     profile_id: str
+    plan_only = False
 
     def __init__(
         self,

@@ -129,7 +129,7 @@ class GatewayAgentEndToEndTests(unittest.TestCase):
                             "name": "E2E Agent",
                             "description": "real process chain",
                             "runtime": "python",
-                            "profiles": ["shell.v1", "workspace.v1"],
+                            "profiles": ["shell.v1", "workspace.v1", "system_observe.v1"],
                         },
                     )
                     self.assertEqual(bundle_response.status_code, 201, bundle_response.text)
@@ -244,6 +244,22 @@ class GatewayAgentEndToEndTests(unittest.TestCase):
                     )["structuredContent"]
                     self.assertEqual(read["content"], "gateway-agent-mcp")
                     self.assertEqual((workspace / "verified.txt").read_text(), "gateway-agent-mcp")
+                    expected_fields = {
+                        "remote_get_host_info": "os",
+                        "remote_get_resources": "memory",
+                        "remote_get_processes": "processes",
+                        "remote_get_network": "interfaces",
+                    }
+                    catalog = {tool["name"]: tool for tool in tools["tools"]}
+                    for request_id, (tool_name, field_name) in enumerate(expected_fields.items(), start=6):
+                        with self.subTest(tool=tool_name):
+                            self.assertEqual(catalog[tool_name]["inputSchema"]["required"], ["agent_id"])
+                            observed = self._mcp_call(
+                                client, base_url, mcp_secret, request_id, "tools/call",
+                                {"name": tool_name, "arguments": {"agent_id": agent_id}},
+                            )["structuredContent"]
+                            self.assertIn(field_name, observed)
+                            self.assertTrue(observed["observed_at"].endswith("Z"))
             finally:
                 self._stop(agent)
                 self._stop(gateway)

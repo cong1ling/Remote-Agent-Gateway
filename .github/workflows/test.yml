@@ -25,6 +25,7 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+          - macos-latest
 
     steps:
       - name: Check out repository
@@ -47,14 +48,59 @@ jobs:
       - name: Install project
         run: python -m pip install -e .
 
-      - name: Run unit tests
+      - name: Install pinned Codex fixture runtime
+        shell: pwsh
+        run: |
+          $install = Join-Path $env:RUNNER_TEMP 'rag-codex'
+          npm install --prefix $install --no-audit --no-fund --no-save '@openai/codex@0.169.0'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $name = if ($IsWindows) { 'codex.exe' } else { 'codex' }
+          $binary = Get-ChildItem -LiteralPath (Join-Path $install 'node_modules/@openai') -Recurse -File -Filter $name |
+            Where-Object { $_.FullName -match '[\\/]vendor[\\/]' } |
+            Select-Object -First 1
+          if (-not $binary) { throw 'Native Codex fixture binary was not found' }
+          $version = & $binary.FullName --version
+          if ($LASTEXITCODE -ne 0 -or $version -ne 'codex-cli 0.169.0') { throw 'Unexpected Codex fixture version' }
+          "RAG_TEST_CODEX=$($binary.FullName)" >> $env:GITHUB_ENV
+
+      - name: Install pinned Chromium acceptance fixture
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $install = Join-Path $env:RUNNER_TEMP 'rag-browser'
+          npm install --prefix $install --no-audit --no-fund --no-save 'playwright@1.62.1'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $module = Join-Path $install 'node_modules/playwright'
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $install 'browsers'
+          node (Join-Path $module 'cli.js') install chromium --only-shell
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "RAG_BROWSER_PLAYWRIGHT=$(Join-Path $module 'index.mjs')" >> $env:GITHUB_ENV
+          "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH" >> $env:GITHUB_ENV
+
+      - name: Install pinned Claude Code fixture runtime
+        shell: pwsh
+        run: |
+          $install = Join-Path $env:RUNNER_TEMP 'rag-claude'
+          $platform = node -p 'process.platform + "-" + process.arch'
+          $package = "claude-code-$platform"
+          npm install --prefix $install --ignore-scripts --no-audit --no-fund --no-save "@anthropic-ai/$package@2.1.306"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $name = if ($IsWindows) { 'claude.exe' } else { 'claude' }
+          $binary = Join-Path $install "node_modules/@anthropic-ai/$package/$name"
+          $version = & $binary --version
+          if ($LASTEXITCODE -ne 0 -or $version -ne '2.1.306 (Claude Code)') { throw 'Unexpected Claude Code fixture version' }
+          "RAG_TEST_CLAUDE=$binary" >> $env:GITHUB_ENV
+
+      - name: Run regression and real-agent acceptance tests
         run: python -m unittest discover -q
 
       - name: Compile Python sources
         run: python -m compileall -q gateway remote_agent agent.py tests
 
       - name: Check frontend JavaScript
-        run: node --check gateway/static/app.js
+        run: |
+          node --check gateway/static/app.js
+          node --check tests/browser_plan_smoke.mjs
 
       - name: Check repository diff
         run: git diff --check

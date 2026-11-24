@@ -13,10 +13,14 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from remote_agent.profiles.base import ProfileHandler
+from remote_agent.profiles.common.planned_action import MANAGED_PROFILES
+from remote_agent.runtimes.base import LocalAgentRuntime
+from remote_agent.runtimes.health import HEALTH_PROFILE
 
 from .config import AgentConfigStore
 from .errors import FatalAgentError
 from .limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
+from .task_runtime import TASK_PROTOCOL_VERSION, TaskRuntime
 from .version import AGENT_VERSION, CORE_VERSION, PROTOCOL_VERSION
 
 
@@ -34,6 +38,7 @@ class RemoteAgent:
         description: str,
         build_id: str,
         handlers: dict[str, ProfileHandler],
+        runtimes: dict[str, LocalAgentRuntime] | None = None,
     ):
         if not handlers:
             raise FatalAgentError("Agent 至少需要加载一个 Profile Handler")
@@ -47,6 +52,8 @@ class RemoteAgent:
         self.running: dict[str, asyncio.Task[None]] = {}
         self.request_profiles: dict[str, str] = {}
         self.send_lock = asyncio.Lock()
+        self.runtimes = dict(runtimes or {})
+        self.task_runtime = TaskRuntime(self, handlers, self.runtimes)
 
     @property
     def profile_ids(self) -> list[str]:
@@ -57,6 +64,14 @@ class RemoteAgent:
         return [self.handlers[profile_id].declaration() for profile_id in self.profile_ids]
 
     def hello_message(self) -> dict[str, Any]:
+        runtimes = self.runtime_declarations
+        supports_plan = bool(self.handlers.keys() & MANAGED_PROFILES)
+        supports_tasks = supports_plan or HEALTH_PROFILE in self.handlers
+        system = platform.system()
+        family = {"Windows": "windows", "Linux": "linux", "Darwin": "macos"}.get(
+            system, "posix" if os.name == "posix" else "unknown",
+        )
+        release = (platform.mac_ver()[0] if system == "Darwin" else "") or platform.release()
         base: dict[str, Any] = {
             "v": PROTOCOL_VERSION,
             "type": "hello",
@@ -67,12 +82,28 @@ class RemoteAgent:
                 "protocol_version": PROTOCOL_VERSION,
                 "build_id": self.build_id,
             },
+            "device": {
+                "device_type": "computer",
+                "platform": family,
+                "platform_version": release[:128] if release and release.isprintable() else None,
+            },
             "metadata": {
                 "hostname": socket.gethostname(),
                 "platform": platform.platform(),
                 "python": platform.python_version(),
                 "pid": os.getpid(),
             },
+            "features": {
+                "task_protocol": TASK_PROTOCOL_VERSION if supports_tasks else 0,
+                "event_stream": supports_tasks,
+                "runtime_adapter": bool(runtimes),
+                "planned_actions": supports_plan,
+                "planned_l1_policy": supports_plan,
+                "health_step_cancel": HEALTH_PROFILE in self.handlers,
+                "action_interception": "limited" if runtimes else "full" if supports_tasks else "none",
+                "evidence": False,
+            },
+            "runtimes": runtimes,
         }
         if self.enrollment_token:
             base.update(
@@ -89,6 +120,10 @@ class RemoteAgent:
         base.update({"agent_id": config.get("agent_id"), "credential": config.get("credential")})
         return base
 
+    @property
+    def runtime_declarations(self) -> list[dict[str, Any]]:
+        return [runtime.declaration() for runtime in self.runtimes.values()]
+
     async def send(self, websocket: ClientConnection, message: dict[str, Any]) -> None:
         async with self.send_lock:
             await websocket.send(json.dumps(message, ensure_ascii=False, separators=(",", ":")))
@@ -101,13 +136,16 @@ class RemoteAgent:
                 raise ValueError("request_id 无效")
             if not isinstance(profile_id, str) or profile_id not in self.handlers:
                 raise ValueError(f"Agent 未加载 Profile: {profile_id}")
+            handler = self.handlers[profile_id]
+            if handler.plan_only:
+                raise PermissionError("此 Profile 仅接受受控计划")
             action = message.get("action")
             if not isinstance(action, str) or not action:
                 raise ValueError("action 无效")
             params = message.get("params")
             if not isinstance(params, dict):
                 raise ValueError("params 必须是对象")
-            result = await self.handlers[profile_id].execute(action, request_id, params)
+            result = await handler.execute(action, request_id, params)
             response = {
                 "v": PROTOCOL_VERSION,
                 "type": "result",
@@ -144,7 +182,10 @@ class RemoteAgent:
         profile_id = message.get("profile")
         if not isinstance(request_id, str) or request_id in self.running:
             return
-        if len(self.running) >= MAX_CONCURRENT_REQUESTS_PER_AGENT:
+        if (
+            len(self.running) + self.task_runtime.active_count
+            >= MAX_CONCURRENT_REQUESTS_PER_AGENT
+        ):
             await self.send(
                 websocket,
                 {
@@ -215,6 +256,22 @@ class RemoteAgent:
                     )
                 elif message_type == "request":
                     await self.dispatch_request(websocket, message)
+                elif message_type == "task_start":
+                    await self.task_runtime.dispatch(
+                        websocket,
+                        message,
+                        reserved_count=len(self.running),
+                    )
+                elif message_type == "task_action_decision":
+                    await self.task_runtime.decide(message)
+                elif message_type == "task_step_cancel":
+                    task_id, step_id = message.get("task_id"), message.get("step_id")
+                    if isinstance(task_id, str) and isinstance(step_id, str):
+                        self.task_runtime.cancel_health_step(task_id, step_id)
+                elif message_type == "task_cancel":
+                    task_id = message.get("task_id")
+                    if isinstance(task_id, str):
+                        await self.task_runtime.cancel(task_id, websocket)
                 elif message_type == "cancel":
                     request_id = message.get("request_id")
                     profile_id = self.request_profiles.get(request_id)
@@ -250,6 +307,7 @@ class RemoteAgent:
                     task.cancel()
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
+                await self.task_runtime.shutdown()
                 self.running.clear()
                 self.request_profiles.clear()
             await asyncio.sleep(delay)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import Any
 from urllib.parse import urlparse
 
@@ -9,9 +10,10 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ContentBlock, Tool
 from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
 
-from .agent_hub import AgentCommandError, AgentHub, AgentOfflineError
+from .agent_hub import AgentCommandError, AgentExecutionStopped, AgentHub, AgentOfflineError
 from .agent_protocol import (
     AGENT_PROTOCOL_VERSION,
     CURRENT_AGENT_VERSION,
@@ -19,15 +21,46 @@ from .agent_protocol import (
     agent_version_status,
 )
 from .config import Settings
-from .database import Database
+from .database import ConflictError, Database
+from .device_directory import DeviceFilters, directory_fields
+from .execution_controls import STOP_EXPLANATION
+from .operation_plan_service import OperationPlanDraft, OperationPlanService, PlanHash, PlanNotFound
 from .profiles import (
     profile_action_mcp_tool,
+    profile_mcp_tools,
     describe_profile_declarations,
     profile_names,
     validate_profile_result,
 )
 from .security import hash_token
 from .shell_policy import describe_shell_policy, evaluate_shell_command
+
+
+_COMMON_TOOLS = {"list_agents", "get_agent_capabilities"}
+_LEGACY_TOOLS = _COMMON_TOOLS | profile_mcp_tools()
+_PLAN_TOOLS = _COMMON_TOOLS | {"create_operation_plan", "get_operation_plan_status", "start_operation_plan"} | profile_mcp_tools(plan_only=True)
+
+
+class GatewayMCP(FastMCP):
+    @staticmethod
+    def _allowed_tools() -> set[str]:
+        token = get_access_token()
+        if token is None:
+            return set()
+        if "gateway:plan" in token.scopes:
+            return _PLAN_TOOLS
+        if "gateway:legacy" in token.scopes:
+            return _LEGACY_TOOLS
+        return set()
+
+    async def list_tools(self) -> list[Tool]:
+        allowed = self._allowed_tools()
+        return [tool for tool in await super().list_tools() if tool.name in allowed]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Sequence[ContentBlock] | dict[str, Any]:
+        if name not in self._allowed_tools():
+            raise ToolError("此 MCP Key 的权限范围不允许调用该工具")
+        return await super().call_tool(name, arguments)
 
 
 class DatabaseTokenVerifier:
@@ -41,7 +74,7 @@ class DatabaseTokenVerifier:
         return AccessToken(
             token=token,
             client_id=key["key_id"],
-            scopes=["gateway:use"],
+            scopes=["gateway:use", f"gateway:{key['scope']}"],
             subject=key["user_id"],
             claims={"user_id": key["user_id"], "email": key["email"]},
         )
@@ -54,6 +87,15 @@ def _current_user_id() -> str:
     return access_token.subject
 
 
+def _plan_response(action: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    try:
+        return action()
+    except PlanNotFound as exc:
+        raise ToolError("该计划不存在或不是由此 MCP Key 提交") from exc
+    except (ValueError, ConflictError) as exc:
+        raise ToolError(str(exc)) from exc
+
+
 def _agent_summary(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
     result = {
         "id": agent["id"],
@@ -62,10 +104,13 @@ def _agent_summary(agent: dict[str, Any], hub: AgentHub) -> dict[str, Any]:
         "status": "online" if hub.is_online(agent["id"]) else "offline",
         "capabilities": profile_names(agent["profiles"]),
         "profile_declarations": agent["profile_declarations"],
+        "features": agent["features"],
+        "runtimes": agent["runtimes"],
         "requires_reenrollment": not agent["profile_declarations"],
         "version": agent["version"],
         "version_status": agent_version_status(agent["version"]),
         "last_seen_at": agent["last_seen_at"],
+        **directory_fields(agent),
     }
     if "shell.v1" in agent["profiles"]:
         result["shell_policy"] = describe_shell_policy(agent["shell_policy_mode"])
@@ -122,9 +167,16 @@ async def _execute_profile_action(
             command=str(params.get("command", "")),
         )
         if violation is not None:
+            db.record_device_alert(
+                user_id, agent_id, "shell_policy", "旧版 Shell 请求被标准策略拒绝",
+                "检查设备 Shell 策略；不要用直连请求绕过已设置的限制",
+                basis={"rule": violation.rule_id}, action="shell.v1/exec", blocked=True,
+            )
             raise ToolError(violation.tool_error())
     try:
         result = await hub.execute(agent_id, profile_id, action, params, timeout)
+    except AgentExecutionStopped as exc:
+        raise ToolError(STOP_EXPLANATION) from exc
     except (AgentOfflineError, AgentCommandError) as exc:
         raise ToolError(str(exc)) from exc
     try:
@@ -133,17 +185,18 @@ async def _execute_profile_action(
         raise ToolError(str(exc)) from exc
 
 
-def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMCP:
+def create_mcp_server(db: Database, hub: AgentHub, settings: Settings, plans: OperationPlanService) -> FastMCP:
     parsed = urlparse(settings.public_url)
     allowed_hosts = [parsed.netloc, "127.0.0.1:*", "localhost:*"]
     allowed_origins = [settings.public_url, "http://127.0.0.1:*", "http://localhost:*"]
-    server = FastMCP(
+    server = GatewayMCP(
         "Remote Agent Gateway",
         instructions=(
             "管理并操作当前用户拥有的远程 Agent。先调用 list_agents 选择目标设备；"
             "调用任何 Agent 专属工具前，必须先对目标 agent_id 调用 get_agent_capabilities。"
-            "只有能力详情中的 Profile Action 明确列出当前工具的 mcp_tool 时才能调用，"
-            "网关会在调用时再次校验。workspace.v1 覆盖已有文件或 edit 前必须先读取文件版本。"
+            "计划型 Key 仅能创建、查询和启动自己提交的免审批计划，需要审批的计划交由登录的设备所有者处理。"
+            "直连 Key 只能调用能力详情中列出 mcp_tool 的 Profile Action，网关会在调用时再次校验。"
+            "workspace.v1 覆盖已有文件或 edit 前必须先读取文件版本。"
             "若目标 Agent 启用了标准 Shell 拦截策略，部分系统级命令会在转发前被拒绝。"
         ),
         token_verifier=DatabaseTokenVerifier(db),
@@ -163,13 +216,16 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
     )
 
     @server.tool(
-        description="列出当前用户拥有的远程 Agent，包括用途、在线状态和可用能力。"
+        description=(
+            "列出当前用户拥有的远程 Agent。可用 filters 按 platform、environment、tags（全部匹配）"
+            "和 capability（capability_ids 中的 ID）筛选；筛选不改变任何操作权限。"
+        )
     )
-    async def list_agents(ctx: Context) -> dict[str, Any]:
+    async def list_agents(ctx: Context, filters: DeviceFilters | None = None) -> dict[str, Any]:
         del ctx
         user_id = _current_user_id()
         agents = db.list_agents(user_id)
-        return {"agents": [_agent_summary(agent, hub) for agent in agents]}
+        return {"agents": [_agent_summary(agent, hub) for agent in agents if filters is None or filters.matches(agent)]}
 
     @server.tool(
         description=(
@@ -184,9 +240,15 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
         agent = db.get_owned_agent(user_id, agent_id)
         if agent is None:
             raise ToolError("Agent 不存在或不属于当前用户")
+        profiles = describe_profile_declarations(agent["profile_declarations"])
+        allowed_tools = GatewayMCP._allowed_tools()
+        for profile in profiles:
+            for action in profile["actions"]:
+                if action.get("mcp_tool") not in allowed_tools:
+                    action.pop("mcp_tool", None)
         return {
             "agent": _agent_summary(agent, hub),
-            "profiles": describe_profile_declarations(agent["profile_declarations"]),
+            "profiles": profiles,
             "gateway_limits": {
                 "max_command_timeout_seconds": settings.max_command_timeout,
                 "max_concurrent_requests_per_agent": MAX_CONCURRENT_REQUESTS_PER_AGENT,
@@ -330,5 +392,110 @@ def create_mcp_server(db: Database, hub: AgentHub, settings: Settings) -> FastMC
             },
             timeout=min(settings.max_command_timeout, 60),
         )
+
+    @server.tool(
+        description=(
+            "读取指定在线 Agent 的主机系统、架构、主机名和 Agent 运行时信息。"
+            "这是 system_observe.v1 的固定只读 Action，不接受命令或探测参数。"
+        )
+    )
+    async def remote_get_host_info(agent_id: str, ctx: Context) -> dict[str, Any]:
+        del ctx
+        return await _execute_profile_action(
+            db=db,
+            hub=hub,
+            user_id=_current_user_id(),
+            agent_id=agent_id,
+            profile_id="system_observe.v1",
+            action="get_host_info",
+            mcp_tool="remote_get_host_info",
+            params={},
+            timeout=min(settings.max_command_timeout, 60),
+        )
+
+    @server.tool(
+        description=(
+            "读取指定在线 Agent 的 CPU、内存和工作目录所在磁盘状态。"
+            "这是 system_observe.v1 的固定只读 Action，不接受命令或探测参数。"
+        )
+    )
+    async def remote_get_resources(agent_id: str, ctx: Context) -> dict[str, Any]:
+        del ctx
+        return await _execute_profile_action(
+            db=db,
+            hub=hub,
+            user_id=_current_user_id(),
+            agent_id=agent_id,
+            profile_id="system_observe.v1",
+            action="get_resources",
+            mcp_tool="remote_get_resources",
+            params={},
+            timeout=min(settings.max_command_timeout, 60),
+        )
+
+    @server.tool(
+        description=(
+            "读取指定在线 Agent 的有界进程摘要，不返回命令参数或环境变量。"
+            "这是 system_observe.v1 的固定只读 Action，不接受命令或探测参数。"
+        )
+    )
+    async def remote_get_processes(agent_id: str, ctx: Context) -> dict[str, Any]:
+        del ctx
+        return await _execute_profile_action(
+            db=db,
+            hub=hub,
+            user_id=_current_user_id(),
+            agent_id=agent_id,
+            profile_id="system_observe.v1",
+            action="get_processes",
+            mcp_tool="remote_get_processes",
+            params={},
+            timeout=min(settings.max_command_timeout, 60),
+        )
+
+    @server.tool(
+        description=(
+            "读取指定在线 Agent 的网络接口和本地地址元数据，不执行远程探测。"
+            "这是 system_observe.v1 的固定只读 Action，不接受命令或探测参数。"
+        )
+    )
+    async def remote_get_network(agent_id: str, ctx: Context) -> dict[str, Any]:
+        del ctx
+        return await _execute_profile_action(
+            db=db,
+            hub=hub,
+            user_id=_current_user_id(),
+            agent_id=agent_id,
+            profile_id="system_observe.v1",
+            action="get_network",
+            mcp_tool="remote_get_network",
+            params={},
+            timeout=min(settings.max_command_timeout, 60),
+        )
+
+    @server.tool(
+        description=(
+            "提交有明确目标和依赖关系的受控计划；仅接受已定义的动作与自有在线设备。"
+            "此调用只保存计划，不执行动作。需要审批时请交给设备所有者。"
+        )
+    )
+    async def create_operation_plan(plan: OperationPlanDraft) -> dict[str, Any]:
+        user_id = _current_user_id()
+        key_id = get_access_token().client_id
+        created = _plan_response(lambda: plans.save(user_id, plan, key_id=key_id))
+        return _plan_response(lambda: plans.delegated_status(user_id, created["id"], key_id))
+
+    @server.tool(description="查看此 MCP Key 所提交计划的步骤、状态和最小化结果。")
+    async def get_operation_plan_status(task_id: str) -> dict[str, Any]:
+        user_id = _current_user_id()
+        key_id = get_access_token().client_id
+        return _plan_response(lambda: plans.delegated_status(user_id, task_id, key_id))
+
+    @server.tool(description="按计划哈希启动此 MCP Key 所提交的免人工审批计划，每个版本只能启动一次。")
+    async def start_operation_plan(task_id: str, plan_hash: PlanHash) -> dict[str, Any]:
+        user_id = _current_user_id()
+        key_id = get_access_token().client_id
+        _plan_response(lambda: plans.start(user_id, task_id, plan_hash, key_id=key_id))
+        return _plan_response(lambda: plans.delegated_status(user_id, task_id, key_id))
 
     return server

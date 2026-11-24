@@ -50,10 +50,16 @@ Remote Agent Gateway 把复杂部分集中在网关：
 - 固定 Profile Catalog、参数校验、结果校验和 MCP 工具映射
 - 每台 Agent 最多同时执行 5 个请求，第 6 个立即返回忙碌
 - 每台 Shell Agent 可在网关配置命令拦截策略，默认关闭
+- 可选 Task Protocol v1、事件流、任务取消和 SQLite 证据记录
+- Windows、macOS、Linux 的固定只读健康检查闭环
+- 本地 Codex `app-server` 的受限 Runtime Adapter 与网关版本兼容目录
+- 人工审批的登记应用恢复、固定源码包构建验证、维护窗口与分批验收
+- 按平台、环境、标签和能力查找设备，健康任务创建时锁定具体设备
+- 按账号、设备、Runtime、动作类型暂停执行，支持实例级熔断和独立告警处理
 - 原生 Web 管理端与 SQLite 持久化
 - Docker Compose 自行部署
 
-当前提供两个标准 Profile：
+当前提供五个标准 Profile：
 
 | Profile | Action | 固定 MCP 工具 | 用途 |
 |---|---|---|---|
@@ -61,6 +67,12 @@ Remote Agent Gateway 把复杂部分集中在网关：
 | `workspace.v1` | `read` | `remote_read_file` | 读取工作目录内的 UTF-8 文本 |
 | `workspace.v1` | `write` | `remote_write_file` | 创建文件或按 SHA-256 安全覆盖已读取版本 |
 | `workspace.v1` | `edit` | `remote_edit_file` | 按 SHA-256 精确替换唯一文本片段 |
+| `system_observe.v1` | `get_host_info` | `remote_get_host_info` | 读取主机系统、架构和运行时信息 |
+| `system_observe.v1` | `get_resources` | `remote_get_resources` | 读取 CPU、内存和磁盘状态 |
+| `system_observe.v1` | `get_processes` | `remote_get_processes` | 读取有界进程摘要 |
+| `system_observe.v1` | `get_network` | `remote_get_network` | 读取本机网络接口和地址元数据 |
+| `service_control.v1` | `inspect`、`restart` | `create_operation_plan`（仅计划） | 登记应用状态、诊断事件、审批恢复与就绪验证 |
+| `build_verify.v1` | `source`、`verify` | `create_operation_plan`（仅计划） | 核对预置源码包 SHA-256、编译和运行固定 Python 单测 |
 
 ## 五分钟跑通
 
@@ -115,7 +127,18 @@ python run.py
 }
 ```
 
-AI 看到的 MCP 工具始终是固定集合，不会为每台 Agent 动态生成一套工具：
+MCP 使用按 Key 权限划分的固定工具集合，不为设备动态生成工具。管理端创建 Key 时默认「仅受控计划」：
+
+```text
+list_agents()
+get_agent_capabilities(agent_id)
+create_operation_plan(plan)
+get_operation_plan_status(task_id)
+start_operation_plan(task_id, plan_hash)
+```
+
+计划型 Key 只能查询及启动自己提交的计划，不能审批或调用直连 Shell 和文件工具。
+需要手动审批的计划只能由登录管理端的所有者启动。旧版直连 Key 保留如下工具，仅应交给受信客户端：
 
 ```text
 list_agents()
@@ -124,9 +147,43 @@ remote_exec(agent_id, command, timeout)
 remote_read_file(agent_id, path, offset, limit)
 remote_write_file(agent_id, path, content, expected_sha256)
 remote_edit_file(agent_id, path, old_text, new_text, expected_sha256)
+remote_get_host_info(agent_id)
+remote_get_resources(agent_id)
+remote_get_processes(agent_id)
+remote_get_network(agent_id)
 ```
 
-标准调用顺序是：
+管理端「远程 Agent」可维护环境和标签。Web `GET /api/agents` 与 MCP
+`list_agents(filters)` 使用相同的 `platform`、`environment`、`tags`、`capability` 条件：
+多个标签必须全部命中，`capability` 与返回的 `capability_ids` 精确匹配，如 `workspace.v1/read`。
+这些条件只用于发现设备，不授予权限。计划始终使用明确的设备 ID。
+
+健康检查也可以从管理端创建：`POST /api/tasks`，当前 `kind` 固定为
+`health_check`。使用 `requested_runtime: "codex"` 由设备端 Codex 发起四个固定只读观察；
+不指定则运行原生检查。Codex 需要设备主动启用，不能静默回退到原生。
+也可配置 `requested_runtime: "claude"`。它通过待观察名称的固定 JSON 计划接入 Broker；
+Claude Code 不开放原生工具，也不接收设备观察结果。两种 Runtime 均不能执行写入、Shell 或批准计划。
+可传 `agent_ids` 或非空 `target_selector`（同设备筛选字段）；后者只在创建时解析一次。
+任务完成后可查询事件、证据和告警；设备启用、自动化测试及现场验收见
+[一期健康检查验收](docs/PHASE1-HEALTH-CHECK-ACCEPTANCE.md)。
+新 Agent 支持在健康任务详情中取消单个观察，保留其它已验证结果但不生成完整健康结论。
+定时只读巡检默认关闭：所有者可授权一台指定设备在 24 小时内按固定间隔运行原生检查。
+巡检保留摘要并对变化和连续失败告警，不调用模型或自动修复；停机解除后须重新授权。
+
+管理端「任务计划」支持为新组装的 Agent 编排受控原生步骤。默认写入需审批；
+设备所有者可给精确匹配的普通文本路径授予 L1 免审批许可，配置文件 L2 始终需人工审批。
+计划审批和启动分离，可查看实时事件、文件读回证据和告警。操作步骤与签收范围见
+[一期验收](docs/PHASE1-ACCEPTANCE.md)。
+维护计划还会把时间窗、并发上限和批次绑定到审批版本，必须在窗口内手动启动，某批未通过则停止后续派发。
+
+「安全控制」可暂停本账号全部执行、单台设备、已适配的 Runtime 或指定高风险动作。
+如需停止整个实例，由 Gateway 主机运维人员对运行实例的同一个 SQLite 文件执行
+`python -m gateway execution-stop pause`；`status` 查询，`resume` 恢复接收新任务。
+停机不关闭登录、连接心跳或证据查询；在途取消不代表设备已确认停止，也不回滚副作用。
+暂停影响到的旧计划或任务不会随恢复重新执行。「风险告警」可以确认、标记解决或忽略；
+告警处理不能代替任务审批、执行修复或恢复停机。
+
+直连 Key 的标准调用顺序是：
 
 ```text
 发现 Agent
@@ -169,6 +226,14 @@ remote_edit_file(agent_id, path, old_text, new_text, expected_sha256)
 
 远程编码推荐同时组装 `shell.v1 + workspace.v1`：Shell 负责目录发现、搜索、Git、构建和测试，Workspace 负责可靠的结构化文本操作。
 
+### 受控计划专用 Profile
+
+- `service_control.v1`：用 `--service-config` 加载工作区外登记配置。只能访问本设备受信的回环管理接口，
+  只读诊断允许免审批；恢复必须绑定旧代际并经人工批准，确认新代际就绪后生成成功证据。
+- `build_verify.v1`：用 `--build-archive` 指定工作区外可信的固定 Python 源码 ZIP。执行需绑定实际字节的 SHA-256 并经人工批准，
+  不接收源码上传、Shell 命令、外部 URL 或安装指令。通过编译并有实际通过的单测才算验证成功；不是任意代码沙箱。
+- 两者都只接受受控计划，与直连 `shell.v1` 不能混装；不能用旧直连 Key 直接调用。
+
 完整契约和新增能力的约束见 [Profile 开发规范](PROFILE_DEVELOPMENT.md)。
 
 ## 安全边界
@@ -207,7 +272,11 @@ python run.py --config-env REMOTE_AGENT_CONFIG_B64 --workdir .
 
 生产环境应从进程启动时就使用专用低权限账号：Linux 账号不得拥有 `sudo`/`wheel` 权限；Windows 使用不属于 Administrators 的本地标准用户；容器使用固定非 root UID、只读根文件系统并删除全部 Linux capabilities。只授予该账号访问 Agent 凭据目录和实际工作目录所需的最小读写权限。
 
-工作台生成的 ZIP 已包含 `remote-agent.service.example`、`Dockerfile.agent.example` 和 `compose.agent.yml.example`，分别提供 systemd 加固、非 root 镜像以及只读容器部署模板。模板中的路径需要按实际 Agent 目录和工作目录调整。
+工作台 ZIP 提供 Linux `remote-agent.service.example`、Windows `remote-agent.task.xml.example`、
+macOS `com.remote-agent.gateway.plist.example`，以及 `Dockerfile.agent.example` 和 `compose.agent.yml.example`。
+宿主机模板不是安装器：先以目标低权限账号在前台使用同一 `--config` 和 `--workdir` 完成一次性注册，
+停止前台进程，再人工核对路径并启用。Windows 示例仅在标准用户登录时运行，macOS 示例是登录用户的
+LaunchAgent；都不是管理员服务。不要将注册令牌、密码或设备凭据内容写入模板。
 
 ## 自行部署
 

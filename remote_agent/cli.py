@@ -16,6 +16,10 @@ from remote_agent.core import (
     privileged_shell_warning,
 )
 from remote_agent.profiles import build_profile_handlers
+from remote_agent.runtimes.base import LocalAgentRuntime
+from remote_agent.runtimes.claude import ClaudeRuntime
+from remote_agent.runtimes.codex import CodexRuntime
+from remote_agent.runtimes.health import HEALTH_PROFILE
 
 
 def parse_args(default_config: Path | None = None) -> argparse.Namespace:
@@ -38,6 +42,13 @@ def parse_args(default_config: Path | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--manifest", type=Path, help="Agent 组装 Manifest，默认读取包内 manifest.json")
+    parser.add_argument("--codex-home", type=Path, help="启用 Codex L0 健康检查的专用本地配置目录")
+    parser.add_argument("--codex-bin", type=Path, help="已验证版本的本机 Codex 可执行文件")
+    parser.add_argument("--claude-bin", type=Path, help="启用 L0 健康检查的专用 Claude Code 原生可执行文件")
+    parser.add_argument("--claude-model", help="设备所有者选定的 Claude 模型 ID")
+    parser.add_argument("--claude-loopback-fixture-port", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--service-config", type=Path, help="工作区外设备本地登记的应用服务配置")
+    parser.add_argument("--build-archive", type=Path, help="工作区外设备所有者已准备的 Python 源码 ZIP")
     return parser.parse_args()
 
 
@@ -57,7 +68,31 @@ async def async_main(default_config: Path | None = None) -> None:
     workdir = Path(args.workdir).expanduser().resolve()
     if not workdir.is_dir():
         raise FatalAgentError(f"工作目录不存在: {workdir}")
-    handlers = build_profile_handlers(manifest.profiles, workdir)
+    handlers = build_profile_handlers(
+        manifest.profiles, workdir, service_config=args.service_config, build_archive=args.build_archive,
+    )
+    runtimes: dict[str, LocalAgentRuntime] = {}
+    if args.codex_home:
+        if HEALTH_PROFILE not in handlers:
+            raise FatalAgentError("启用 Codex 健康检查需要装配 system_observe.v1")
+        try:
+            runtimes["codex"] = CodexRuntime.from_installation(
+                args.codex_home, args.codex_bin, config_env=args.config_env,
+            )
+        except ValueError as exc:
+            raise FatalAgentError(str(exc)) from exc
+    elif args.codex_bin:
+        raise FatalAgentError("--codex-bin 需要同时指定 --codex-home")
+    if args.claude_bin or args.claude_model or args.claude_loopback_fixture_port is not None:
+        if HEALTH_PROFILE not in handlers or not args.claude_bin or not args.claude_model:
+            raise FatalAgentError("启用 Claude 健康检查需要 system_observe.v1、--claude-bin 和 --claude-model")
+        try:
+            runtimes["claude"] = ClaudeRuntime.from_installation(
+                args.claude_bin, args.claude_model, workdir=workdir, config_env=args.config_env,
+                fixture_port=args.claude_loopback_fixture_port,
+            )
+        except ValueError as exc:
+            raise FatalAgentError(str(exc)) from exc
     warning = privileged_shell_warning(manifest.profiles, workdir)
     if warning:
         print(warning, file=sys.stderr, flush=True)
@@ -69,6 +104,7 @@ async def async_main(default_config: Path | None = None) -> None:
         description=args.description.strip() if args.description is not None else manifest.description,
         build_id=manifest.build_id,
         handlers=handlers,
+        runtimes=runtimes,
     )
     await agent.run_forever()
 

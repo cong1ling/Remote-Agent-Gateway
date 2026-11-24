@@ -142,6 +142,30 @@ Workspace 的路径限制始终有效于 Workspace Action，但不是操作系�
 - 只加载 Workspace 时，能力面更窄，但真正抵御本机恶意进程仍需操作系统用户、容器或沙箱。
 - 不以 `--workdir` 宣称限制 Shell 权限。
 
+## 受控计划专用 Profile
+
+对于必须经任务授权和结果校验的动作，Profile 标记 `plan_only`，映射到固定的
+`create_operation_plan`，不开放直连短请求。Webhook、Shell 命令、源码和本地资源注册都不由计划提供。
+
+| Profile | 计划动作 | 边界 |
+| --- | --- | --- |
+| `service_control.v1` | `service.inspect`（L0）、`service.restart`（L2） | 设备本地登记的服务 ID 和回环管理端口；恢复必须绑定旧代际 |
+| `build_verify.v1` | `build.source`（L0）、`build.verify`（L1，人工审批） | 工作区外预置的普通文件 ZIP，实际 SHA-256 必须匹配，固定 Python 单测 |
+
+`service_control.v1` 的 `--service-config` 是设备侧私有文件，格式为
+`{"services":[{"id":"demo","port":12345,"credential":"<设备侧随机凭据>"}]}`，不进 ZIP、计划或证据。
+本机受信管理端监听 `127.0.0.1`，校验 Bearer 凭据。`GET /rag/v1/status` 返回有界 JSON：
+`state`（`ready`/`degraded`/`stopped`/`starting`）、`generation`（32 位小写十六进制）和 `recent_events`
+（至多 12 条，每条允许的 `code` 和 Unix 秒 `observed_at`）。`POST /rag/v1/restart` 接收
+`expected_generation`，服务端需原子校验代际与可恢复状态，冲突返回 `409`，受理返回 `202`。
+Action 不重试 POST；只有读取到新代际的 `ready` 才算通过。测试夹具只管理其创建的演示进程，
+不等同于通用 SCM/systemd/launchd 管理或任意服务日志采集。
+
+`build_verify.v1` 在注册前验证 `--build-archive` 和基本 ZIP 结构；每次执行对读到的同一份字节先计算摘要、
+再解包。ZIP 最多 8 MiB、解包最多 32 MiB/1,024 条路径，不允许逃逸、链接或同名别名。
+仅在临时目录编译并从 `tests/` 执行固定 `unittest`，默认执行时限 20 秒；只返回摘要和结构化计数。
+这会执行源码包中受信任的代码，不是系统沙箱；要求单独低权限或容器环境，外网由设备隔离策略限制。
+
 ## 扩展方式
 
 新增 Profile：

@@ -38,8 +38,8 @@ button { cursor: pointer; }
 .segmented button { border: 0; border-bottom: 2px solid transparent; padding: 12px; color: var(--muted); background: transparent; }
 .segmented button.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 700; }
 label { display: grid; gap: 8px; margin: 16px 0; color: #3d4944; font-size: 14px; font-weight: 650; }
-input, textarea { width: 100%; border: 1px solid #cfd7d3; border-radius: 5px; padding: 11px 12px; color: var(--ink); background: var(--surface); outline: none; resize: vertical; }
-input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(23, 107, 77, .12); }
+input, textarea, select { width: 100%; border: 1px solid #cfd7d3; border-radius: 5px; padding: 11px 12px; color: var(--ink); background: var(--surface); outline: none; resize: vertical; }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(23, 107, 77, .12); }
 .primary, .secondary, .danger, .text-button { min-height: 38px; border-radius: 5px; padding: 8px 14px; border: 1px solid transparent; font-weight: 700; }
 .primary { color: white; background: var(--accent); }
 .primary:hover { background: var(--accent-hover); }
@@ -112,6 +112,10 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .profile-option strong { margin-bottom: 4px; font-size: 13px; }
 .profile-option span { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .agent-list, .data-list { display: grid; gap: 10px; }
+.device-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 10px; margin-bottom: 14px; }
+.device-filters label { min-width: 0; margin: 0; font-size: 12px; }
+.device-filters select { min-width: 0; padding: 8px; }
+.device-identity { overflow-wrap: anywhere; }
 .agent-card, .data-row { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .agent-card { padding: 18px 20px; display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(130px, .8fr) auto; align-items: center; gap: 20px; }
 .agent-title { min-width: 0; }
@@ -146,6 +150,18 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .manual-notice { min-height: 76px; margin-bottom: 16px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-left: 3px solid #c68b2d; background: #fff6e6; }
 .manual-notice strong { display: block; margin-bottom: 5px; color: #5e461c; font-size: 13px; }
 .manual-notice p { margin: 0; color: #7a6338; font-size: 12px; line-height: 1.5; }
+.health-notice { min-height: 58px; margin-bottom: 16px; padding: 13px 16px; display: flex; align-items: center; gap: 12px; border-left: 3px solid var(--accent); background: #eef7f3; }
+.health-notice strong { color: var(--accent); font-size: 13px; }
+.health-notice span { color: #547064; font-size: 12px; }
+.health-task-row { grid-template-columns: minmax(180px, 1fr) auto minmax(130px, .5fr) auto; }
+.execution-control-row, .risk-alert-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+.health-status { padding: 4px 8px; border-radius: 4px; color: #5d6863; background: #edf0ef; font-size: 11px; }
+.health-status.running, .health-status.queued { color: #76561e; background: #fff3d9; }
+.health-status.waiting_approval { color: #76561e; background: #fff3d9; }
+.health-status.completed { color: var(--accent); background: #e2f4eb; }
+.health-status.failed, .health-status.cancelled, .health-status.verification_failed { color: var(--danger); background: #fbe9e7; }
+.plan-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12px; }
+.plan-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .empty { min-height: 190px; border: 1px dashed #cbd3cf; display: grid; place-items: center; text-align: center; color: var(--muted); background: rgba(255, 255, 255, .45); }
 .empty strong { display: block; margin-bottom: 5px; color: #3a4641; }
 
@@ -249,9 +265,11 @@ dialog::backdrop { background: rgba(12, 20, 17, .5); }
   .agent-card { grid-template-columns: 1fr; gap: 13px; }
   .row-actions { justify-content: flex-start; }
   .data-row { grid-template-columns: 1fr; gap: 8px; }
+  .health-task-row, .execution-control-row, .risk-alert-row { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; padding: 20px 0; }
   .section-heading p { max-width: 210px; }
   .manual-notice { align-items: flex-start; flex-direction: column; }
+  .health-notice { align-items: flex-start; flex-direction: column; gap: 5px; }
   .catalog-footer, .protocol-section-head { align-items: flex-start; flex-direction: column; }
   .schema-list, .dialect-grid { grid-template-columns: 1fr; }
   .error-list div { grid-template-columns: 1fr; gap: 5px; }

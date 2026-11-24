@@ -32,7 +32,7 @@ class VersionConsistencyTests(unittest.TestCase):
         self.assertIn(f"| Agent Core | `{CORE_VERSION}` |", readme)
         self.assertIn(f"| WebSocket Protocol | `{PROTOCOL_VERSION}` |", readme)
         self.assertEqual(
-            re.findall(r'/assets/(?:styles\.css|app\.js)\?v=([^"\s]+)', index),
+            re.findall(r'/assets/(?:styles\.css|app\.js)\?v=([^"&\s]+)', index),
             [version, version],
         )
 

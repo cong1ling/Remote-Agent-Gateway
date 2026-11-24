@@ -5,6 +5,7 @@
   "build_id": "source-dev",
   "profiles": [
     "shell.v1",
-    "workspace.v1"
+    "workspace.v1",
+    "system_observe.v1"
   ]
 }

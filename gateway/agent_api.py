@@ -7,7 +7,13 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .agent_hub import AgentConnection, AgentHub
-from .agent_protocol import AGENT_PROTOCOL_VERSION, validate_agent_version
+from .agent_protocol import (
+    AGENT_PROTOCOL_VERSION,
+    validate_agent_features,
+    validate_agent_version,
+    validate_device_declaration,
+    validate_runtime_declarations,
+)
 from .database import Database
 from .profiles import (
     profile_ids,
@@ -28,9 +34,30 @@ def _text(value: object, field: str, maximum: int, required: bool = True) -> str
     return normalized
 
 
+def _changed_device_components(
+    before: dict[str, Any], device: dict[str, Any], version: dict[str, Any], runtimes: list[dict[str, Any]],
+) -> list[str]:
+    changes = []
+    if before["device"] and device and any(
+        before["device"].get(key) != device[key] for key in ("platform", "platform_version")
+    ):
+        changes.append("platform")
+    if all(key in before["version"] for key in ("agent_version", "core_version")) and any(
+        before["version"][key] != version[key] for key in ("agent_version", "core_version")
+    ):
+        changes.append("agent_version")
+    runtime_keys = ("provider_id", "runtime_version", "adapter_version", "mode")
+    previous_ids = {tuple(item.get(key) for key in runtime_keys) for item in before["runtimes"]}
+    current_ids = {tuple(item.get(key) for key in runtime_keys) for item in runtimes}
+    if previous_ids != current_ids:
+        changes.append("runtimes")
+    return changes
+
+
 async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentHub) -> None:
     await websocket.accept()
     agent_id: str | None = None
+    changed: list[str] = []
     try:
         hello = await asyncio.wait_for(websocket.receive_json(), timeout=15)
         if not isinstance(hello, dict) or hello.get("type") != "hello":
@@ -42,6 +69,9 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
         profile_declarations = validate_profile_declarations(hello.get("profiles"))
         profiles = profile_ids(profile_declarations)
         version = validate_agent_version(hello.get("version"), AGENT_PROTOCOL_VERSION)
+        features = validate_agent_features(hello.get("features"))
+        runtimes = validate_runtime_declarations(hello.get("runtimes"))
+        device = validate_device_declaration(hello.get("device"))
         validate_profile_agent_compatibility(profile_declarations, version)
 
         enrollment_token = hello.get("enrollment_token")
@@ -59,6 +89,9 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
                 description,
                 profile_declarations,
                 version,
+                features,
+                runtimes,
+                device=device,
             )
             if registered is None:
                 raise ValueError("注册令牌无效、已过期或已被使用")
@@ -79,14 +112,27 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
                 raise ValueError("Agent 设备凭据无效或已被撤销")
             if agent["profiles"] != profiles:
                 raise ValueError("Agent Profile 与注册记录不一致，请重新注册 Agent")
-            db.update_agent_runtime(agent_id, profile_declarations, version)
+            changed = _changed_device_components(agent, device, version, runtimes)
+            db.update_agent_runtime(agent_id, profile_declarations, version, features, runtimes, device=device)
             user_id = agent["user_id"]
             await websocket.send_json(
                 {"v": AGENT_PROTOCOL_VERSION, "type": "ready", "agent_id": agent_id}
             )
 
-        connection = AgentConnection(agent_id, user_id, websocket)
+        connection = AgentConnection(
+            agent_id,
+            user_id,
+            websocket,
+            features=features,
+            runtimes=runtimes,
+        )
         await hub.register(connection)
+        if changed:
+            db.record_device_alert(
+                user_id, agent_id, "device_version_changed", "设备或本地 Runtime 的版本声明发生变化",
+                "核对这是否为计划内变更，并检查声明与兼容目录",
+                basis={"components": changed}, severity="info",
+            )
         db.touch_agent(agent_id)
 
         while True:
@@ -99,6 +145,14 @@ async def handle_agent_websocket(websocket: WebSocket, db: Database, hub: AgentH
                 db.touch_agent(agent_id)
             elif message_type == "result":
                 await hub.resolve(connection, message)
+            elif message_type in {
+                "task_ack",
+                "task_event",
+                "task_action_request",
+                "task_result",
+                "task_error",
+            }:
+                await hub.resolve_task(connection, message)
     except (ValueError, asyncio.TimeoutError) as exc:
         await websocket.send_json(
             {"v": AGENT_PROTOCOL_VERSION, "type": "error", "error": str(exc)}

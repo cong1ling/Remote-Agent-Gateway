@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>Remote Agent Gateway</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=0.2.3">
+  <link rel="stylesheet" href="/assets/styles.css?v=0.2.3&amp;rev=alerts1">
 </head>
 <body>
   <main id="auth-view" class="auth-layout">
@@ -43,10 +43,14 @@
       <div class="sidebar-brand"><span class="brand-mark small">RG</span><strong>Remote Gateway</strong></div>
       <nav id="main-nav" aria-label="主导航">
         <button class="active" data-view="overview" type="button"><span>01</span>概览</button>
-        <button data-view="builder" type="button"><span>02</span>Agent 工作台（推荐）</button>
-        <button data-view="agents" type="button"><span>03</span>远程 Agent</button>
-        <button data-view="keys" type="button"><span>04</span>MCP Keys</button>
-        <button data-view="tokens" type="button"><span>05</span>手动接入</button>
+        <button data-view="health" type="button"><span>02</span>健康检查</button>
+        <button data-view="plans" type="button"><span>03</span>任务计划</button>
+        <button data-view="builder" type="button"><span>04</span>Agent 工作台（推荐）</button>
+        <button data-view="agents" type="button"><span>05</span>远程 Agent</button>
+        <button data-view="keys" type="button"><span>06</span>MCP Keys</button>
+        <button data-view="tokens" type="button"><span>07</span>手动接入</button>
+        <button data-view="controls" type="button"><span>08</span>安全控制</button>
+        <button data-view="alerts" type="button"><span>09</span>风险告警</button>
       </nav>
       <div class="sidebar-foot">
         <span id="user-email"></span>
@@ -68,6 +72,20 @@
           <div id="overview-agents" class="agent-list"></div>
         </section>
 
+        <section id="view-health" class="view">
+          <div class="section-heading"><div><h2>跨设备健康检查</h2><p>健康检查只执行固定的 L0 观察，不自动修复或修改设备。</p></div><button id="new-health-button" class="primary" type="button">开始检查</button></div>
+          <div class="health-notice"><strong>安全模式：只读观察</strong><span>目标 Agent 必须在线并声明 Task Protocol v1 与 system_observe.v1。</span></div>
+          <div id="health-tasks" class="data-list"></div>
+          <div class="subsection-heading"><div><h3>定时只读巡检</h3><p>默认关闭；每次授权 24 小时，只保留摘要，不调用模型或自动修复。</p></div><button id="new-monitor-button" class="secondary" type="button">授权巡检</button></div>
+          <div id="health-monitors" class="data-list"></div>
+        </section>
+
+        <section id="view-plans" class="view">
+          <div class="section-heading"><div><h2>跨设备任务计划</h2><p>预览、审批和执行受控动作，查看证据与风险告警。</p></div><button id="new-plan-button" class="primary" type="button">新建计划</button></div>
+          <div class="health-notice"><strong>先审批，再执行</strong><span>只读动作无需审批；恢复服务、运行测试和未授权的文件变更需要批准。设备重连、计划修改或授权过期后，须重新提交。</span></div>
+          <div id="operation-plans" class="data-list"></div>
+        </section>
+
         <section id="view-builder" class="view">
           <div class="section-heading"><div><h2>Agent 工作台</h2><p>从可信 Profile 目录组装一个可独立搬运的 Python Agent</p></div><button class="primary" data-action="new-bundle" type="button">开始组装</button></div>
           <div class="builder-intro">
@@ -83,7 +101,20 @@
 
         <section id="view-agents" class="view">
           <div class="section-heading"><div><h2>远程 Agent</h2><p>设备状态、用途和标准 Profile</p></div><button class="primary" data-action="new-bundle" type="button">组装 Agent</button></div>
+          <div id="agent-directory-filters" class="device-filters" role="group" aria-label="设备筛选"></div>
           <div id="agents-list" class="agent-list"></div>
+        </section>
+
+        <section id="view-controls" class="view">
+          <div class="section-heading"><div><h2>远端执行停机控制</h2><p>在 Gateway 拒绝新派发，并请求取消命中的在途执行</p></div></div>
+          <div class="manual-notice"><div><strong>取消不是回滚</strong><p>已发生的写入、服务恢复或构建无法自动撤回。恢复后须核对设备状态，重新提交受影响的任务。</p></div></div>
+          <div id="execution-controls" class="data-list"></div>
+        </section>
+
+        <section id="view-alerts" class="view">
+          <div class="section-heading"><div><h2>设备与任务告警</h2><p>查看当前账号最近 100 条告警、触发依据和处理记录</p></div></div>
+          <div class="health-notice"><strong>处理告警不等于授权</strong><span>确认、解决或忽略不会批准计划、执行修复或解除停机。</span></div>
+          <div id="risk-alerts" class="data-list"></div>
         </section>
 
         <section id="view-keys" class="view">
@@ -131,6 +162,6 @@
   </dialog>
 
   <div id="toast" role="status" aria-live="polite"></div>
-  <script src="/assets/app.js?v=0.2.3" defer></script>
+  <script src="/assets/app.js?v=0.2.3&amp;rev=health3" defer></script>
 </body>
 </html>

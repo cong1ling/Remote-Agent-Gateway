@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from remote_agent.core.limits import MAX_CONCURRENT_REQUESTS_PER_AGENT
+from remote_agent.profiles.common.managed_contracts import (
+    BUILD_BACKEND, BUILD_PROFILE, IDENTIFIER, LOCAL_PLAN_PROFILES, SERVICE_BACKEND, SERVICE_PROFILE,
+)
 
 from .agent_protocol import version_tuple
 
@@ -14,6 +18,29 @@ WORKSPACE_MAX_FILE_BYTES = 8 * 1024 * 1024
 WORKSPACE_MAX_READ_LINES = 2000
 WORKSPACE_MAX_READ_BYTES = 50 * 1024
 WORKSPACE_MAX_WRITE_BYTES = 2 * 1024 * 1024
+
+
+def _plan_parameter(name: str, description: str, *, required: bool = True) -> dict[str, Any]:
+    return {"name": name, "type": "string", "description": description, "required": required}
+
+
+def _plan_action(
+    name: str, operation: str, risk: str, description: str, parameters: list[dict[str, Any]],
+    returns: list[dict[str, str]], errors: list[dict[str, str]],
+) -> dict[str, Any]:
+    return {
+        "name": name, "mcp_tool": "create_operation_plan", "plan_operation": operation, "risk_level": risk,
+        "description": description, "parameters": parameters, "returns": returns, "errors": errors,
+    }
+
+
+_SERVICE_ID_PARAM = _plan_parameter("service_id", "设备本地登记的服务 ID。")
+_SERVICE_STATUS_FIELDS = [
+    {"name": "generation", "type": "string", "description": "服务进程代际。"},
+    {"name": "state", "type": "string", "description": "ready、degraded、stopped 或 starting。"},
+    {"name": "recent_events", "type": "array", "description": "最近的类型化诊断记录，不含自由文本和凭据。"},
+]
+_SOURCE_SHA256_FIELD = {"name": "source_sha256", "type": "string", "description": "本地源码 ZIP 的完整 SHA-256。"}
 
 PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "shell.v1": {
@@ -293,7 +320,172 @@ PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
             "atomic_write": True,
             "optimistic_concurrency": True,
         },
-    }
+    },
+    "system_observe.v1": {
+        "id": "system_observe.v1",
+        "name": "系统只读观察",
+        "description": (
+            "通过固定、只读的观察 Action 获取主机、资源、进程和网络元数据，"
+            "不接受任意命令或远程探测参数。"
+        ),
+        "status": "preview",
+        "minimum_agent_version": "0.2.3",
+        "implementations": {
+            "python": {
+                "source": "system_observe_v1",
+                "minimum_python": "3.11",
+            }
+        },
+        "actions": [
+            {
+                "name": "get_host_info",
+                "mcp_tool": "remote_get_host_info",
+                "description": "读取主机操作系统、架构、主机名和 Agent 运行时信息。",
+                "parameters": [],
+                "returns": [
+                    {"name": "os", "type": "string", "description": "归一化操作系统 ID。"},
+                    {"name": "hostname", "type": "string", "description": "设备主机名。"},
+                    {"name": "architecture", "type": "string", "description": "设备 CPU 架构。"},
+                    {"name": "observed_at", "type": "string", "description": "UTC 观察时间。"},
+                    {
+                        "name": "privileges", "type": "object", "required": False,
+                        "description": "is_admin 是 Windows 当前令牌的已启用管理员组状态，is_root 是 POSIX 有效 UID 是否为 0；null 为不适用或未知。",
+                    },
+                    {
+                        "name": "linux_distribution", "type": "object", "required": False, "nullable": True,
+                        "description": "仅 Linux：os-release 中的 id 和可空 version_id；无法读取为 null。",
+                    },
+                    {
+                        "name": "linux_tools", "type": "object", "required": False,
+                        "description": "仅 Linux：sudo_on_path、docker_on_path、podman_on_path。只表示 PATH 上找到可执行文件，不测试权限、守护进程或远程访问。",
+                    },
+                ],
+                "errors": [{"name": "observe_failed", "description": "读取主机信息失败。"}],
+            },
+            {
+                "name": "get_resources",
+                "mcp_tool": "remote_get_resources",
+                "description": "读取 CPU、内存和 Agent 工作目录所在磁盘的资源状态。",
+                "parameters": [],
+                "returns": [
+                    {"name": "cpu", "type": "object", "description": "CPU 数量和可用负载信息。"},
+                    {
+                        "name": "memory", "type": "object", "nullable": True,
+                        "description": (
+                            "物理内存字节和 utilization_percent。macOS 用匿名页、wired 页和实际压缩页估算；"
+                            "采样不可用时没有利用率，不代表健康。"
+                        ),
+                    },
+                    {"name": "disks", "type": "array", "description": "磁盘空间统计。"},
+                    {"name": "observed_at", "type": "string", "description": "UTC 观察时间。"},
+                ],
+                "errors": [{"name": "observe_failed", "description": "读取资源信息失败。"}],
+            },
+            {
+                "name": "get_processes",
+                "mcp_tool": "remote_get_processes",
+                "description": "读取有界的本机进程摘要，不返回命令参数或环境变量。",
+                "parameters": [],
+                "returns": [
+                    {"name": "available", "type": "boolean", "description": "进程观察是否可用。"},
+                    {"name": "processes", "type": "array", "description": "最多 100 个进程摘要。"},
+                    {"name": "truncated", "type": "boolean", "description": "是否超过返回上限。"},
+                    {"name": "observed_at", "type": "string", "description": "UTC 观察时间。"},
+                ],
+                "errors": [{"name": "observe_failed", "description": "读取进程信息失败。"}],
+            },
+            {
+                "name": "get_network",
+                "mcp_tool": "remote_get_network",
+                "description": "读取本机接口、地址和 TCP 监听表；不做 DNS、连接或端口扫描。",
+                "parameters": [],
+                "returns": [
+                    {"name": "hostname", "type": "string", "description": "设备主机名。"},
+                    {"name": "interfaces", "type": "array", "description": "网络接口名称和索引。"},
+                    {"name": "addresses", "type": "array", "description": "本机接口上的数字 IP 地址。"},
+                    {"name": "observed_at", "type": "string", "description": "UTC 观察时间。"},
+                    {
+                        "name": "tcp_listeners", "type": "object", "required": False, "nullable": True,
+                        "description": (
+                            "Agent 可见的本机 IPv4/IPv6 TCP 监听端口：ports 去重升序，最多 128 个，"
+                            "超过时 truncated 为 true。null 表示未知，空列表表示采样时未发现监听。"
+                        ),
+                    },
+                ],
+                "errors": [{"name": "observe_failed", "description": "读取网络信息失败。"}],
+            },
+        ],
+        "runtime_contract": {
+            "selection": "Agent 启动时绑定当前设备平台；所有 Action 固定为只读观察。",
+            "fields": [
+                {"name": "scope", "type": "string", "description": "固定为 host。"},
+                {"name": "mode", "type": "string", "description": "固定为 read_only。"},
+                {"name": "platform", "type": "string", "description": "windows、macos、linux 或 posix。"},
+                {"name": "actions", "type": "array", "description": "完整的四个观察 Action。"},
+            ],
+        },
+        "limits": {
+            "processes": 100,
+            "network_entries": 128,
+            "tcp_listening_ports": 128,
+            "read_only": True,
+            "action_interception": "full",
+        },
+    },
+    SERVICE_PROFILE: {
+        "id": SERVICE_PROFILE, "name": "登记应用诊断与恢复", "status": "preview", "plan_only": True,
+        "description": "诊断和恢复设备本地登记的应用服务。不允许指定地址、系统服务或任意命令。",
+        "minimum_agent_version": "0.2.3",
+        "implementations": {"python": {"source": "service_control_v1", "minimum_python": "3.11"}},
+        "actions": [
+            _plan_action(
+                "inspect", "service.inspect", "L0", "读取服务状态和限定的诊断记录。",
+                [_SERVICE_ID_PARAM], _SERVICE_STATUS_FIELDS,
+                [{"name": "service.unavailable", "description": "登记的本地服务管理接口不可访问。"}],
+            ),
+            _plan_action(
+                "restart", "service.restart", "L2", "审批后恢复当前故障代际，并验证新的代际达到就绪状态。",
+                [_SERVICE_ID_PARAM, _plan_parameter("expected_generation", "最近一次观察到的故障代际。")],
+                [*_SERVICE_STATUS_FIELDS, {"name": "verified", "type": "boolean", "description": "新代际已就绪。"}],
+                [{"name": "service.generation_changed", "description": "服务已变化；重新观察，不能重放。"}],
+            ),
+        ],
+        "runtime_contract": {
+            "selection": "以设备端 --service-config 显式绑定，只访问本机回环地址。",
+            "fields": [
+                {"name": "backend", "type": "string", "description": SERVICE_BACKEND},
+                {"name": "service_ids", "type": "array", "description": "设备所有者登记的服务别名。"},
+            ],
+        },
+        "limits": {"service_count": 16, "events": 12, "restart_requires_approval": True},
+    },
+    BUILD_PROFILE: {
+        "id": BUILD_PROFILE, "name": "固定源码包构建验证", "status": "preview", "plan_only": True,
+        "description": "核验设备预置的可信 Python 源码 ZIP；只通过受控计划完成编译检查和单元测试。",
+        "minimum_agent_version": "0.2.3",
+        "implementations": {"python": {"source": "build_verify_v1", "minimum_python": "3.11"}},
+        "actions": [
+            _plan_action(
+                "source", "build.source", "L0", "读取源码包 SHA-256；可要求吻合已批准的摘要。",
+                [_plan_parameter("source_sha256", "要求吻合的可选小写 SHA-256。", required=False)],
+                [_SOURCE_SHA256_FIELD],
+                [{"name": "build.source_mismatch", "description": "设备当前源码包与计划不一致。"}],
+            ),
+            _plan_action(
+                "verify", "build.verify", "L1", "人工审批后对完全相同的源码字节运行固定编译检查和 unittest。",
+                [_plan_parameter("source_sha256", "必须吻合的源码 ZIP 小写 SHA-256。")],
+                [_SOURCE_SHA256_FIELD,
+                 {"name": "compiled", "type": "boolean", "description": "Python 编译检查是否通过。"},
+                 {"name": "tests_run", "type": "integer", "description": "运行的测试数和失败、错误、跳过计数。"}],
+                [{"name": "build.source_mismatch", "description": "摘要不符，禁止启动验证进程。"}],
+            ),
+        ],
+        "runtime_contract": {
+            "selection": "所有者以 --build-archive 在工作区外预置单一可信源码 ZIP。",
+            "fields": [{"name": "backend", "type": "string", "description": BUILD_BACKEND}],
+        },
+        "limits": {"verify_requires_approval": True, "remote_commands": False, "raw_output": False},
+    },
 }
 
 SHELL_DIALECTS: dict[str, set[str]] = {
@@ -314,6 +506,8 @@ def validate_profiles(profiles: object) -> list[str]:
             normalized.append(profile)
     if not normalized:
         raise ValueError("Agent 至少需要实现一个标准 Profile")
+    if "shell.v1" in normalized and LOCAL_PLAN_PROFILES.intersection(normalized):
+        raise ValueError("登记服务或构建 Profile 不得与旧版直连 Shell 混装")
     return normalized
 
 
@@ -335,12 +529,15 @@ def validate_profile_declarations(value: object) -> list[dict[str, Any]]:
             runtime = _validate_shell_runtime(runtime)
         elif profile_id == "workspace.v1":
             runtime = _validate_workspace_runtime(runtime)
+        elif profile_id == "system_observe.v1":
+            runtime = _validate_system_observe_runtime(runtime)
+        elif profile_id in LOCAL_PLAN_PROFILES:
+            runtime = _validate_local_plan_runtime(profile_id, runtime)
         elif not isinstance(runtime, dict):
             raise ValueError(f"Profile {profile_id} 缺少 runtime 声明")
         normalized.append({"id": profile_id, "runtime": runtime})
         seen.add(profile_id)
-    if not normalized:
-        raise ValueError("Agent 至少需要实现一个标准 Profile")
+    validate_profiles(list(seen))
     return normalized
 
 
@@ -387,6 +584,55 @@ def _validate_workspace_runtime(value: object) -> dict[str, Any]:
         "encoding": "utf-8",
         "max_file_bytes": WORKSPACE_MAX_FILE_BYTES,
     }
+
+
+def _validate_system_observe_runtime(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("system_observe.v1 必须声明运行时")
+    if value.get("scope") != "host":
+        raise ValueError("system_observe.v1 runtime.scope 必须是 host")
+    if value.get("mode") != "read_only":
+        raise ValueError("system_observe.v1 runtime.mode 必须是 read_only")
+    operating_system = value.get("platform")
+    if operating_system not in {"windows", "macos", "linux", "posix"}:
+        raise ValueError("system_observe.v1 runtime.platform 无效")
+    actions = value.get("actions")
+    required_actions = {
+        "get_host_info",
+        "get_resources",
+        "get_processes",
+        "get_network",
+    }
+    if (
+        not isinstance(actions, list)
+        or not all(isinstance(action, str) for action in actions)
+        or not required_actions.issubset(actions)
+    ):
+        raise ValueError("system_observe.v1 runtime.actions 不完整")
+    return {
+        "scope": "host",
+        "mode": "read_only",
+        "platform": operating_system,
+        "actions": sorted(set(actions)),
+    }
+
+
+def _validate_local_plan_runtime(profile_id: str, value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"Profile {profile_id} 缺少 runtime 声明")
+    if profile_id == BUILD_PROFILE:
+        if value != {"backend": BUILD_BACKEND}:
+            raise ValueError("构建验证 Profile 声明了未知后端")
+        return {"backend": BUILD_BACKEND}
+    service_ids = value.get("service_ids")
+    if (
+        set(value) != {"backend", "service_ids"} or value.get("backend") != SERVICE_BACKEND
+        or not isinstance(service_ids, list) or not 1 <= len(service_ids) <= 16
+        or not all(isinstance(item, str) and IDENTIFIER.fullmatch(item) for item in service_ids)
+        or len(set(service_ids)) != len(service_ids)
+    ):
+        raise ValueError("应用服务 Profile 的本地登记声明无效")
+    return {"backend": SERVICE_BACKEND, "service_ids": sorted(service_ids)}
 
 
 def profile_ids(declarations: list[dict[str, Any]]) -> list[str]:
@@ -443,6 +689,7 @@ def public_profile_catalog() -> list[dict[str, Any]]:
                 "name": definition["name"],
                 "description": definition["description"],
                 "status": definition["status"],
+                "plan_only": definition.get("plan_only", False),
                 "minimum_agent_version": definition.get("minimum_agent_version"),
                 "runtimes": sorted(definition["implementations"]),
                 "actions": deepcopy(definition["actions"]),
@@ -453,10 +700,11 @@ def public_profile_catalog() -> list[dict[str, Any]]:
     return catalog
 
 
-def profile_mcp_tools() -> set[str]:
+def profile_mcp_tools(*, plan_only: bool = False) -> set[str]:
     return {
         action["mcp_tool"]
         for definition in PROFILE_REGISTRY.values()
+        if definition.get("plan_only", False) == plan_only
         for action in definition.get("actions", [])
         if isinstance(action.get("mcp_tool"), str) and action["mcp_tool"]
     }
@@ -480,6 +728,8 @@ def validate_profile_result(
 ) -> dict[str, Any]:
     if profile_id == "workspace.v1":
         return _validate_workspace_result(action, result)
+    if profile_id == "system_observe.v1":
+        return _validate_system_observe_result(action, result)
     if profile_id != "shell.v1" or action != "exec":
         raise ValueError(f"不支持的 Profile 操作: {profile_id}/{action}")
     stdout = result.get("stdout")
@@ -596,3 +846,144 @@ def _validate_workspace_result(action: str, result: dict[str, Any]) -> dict[str,
             "sha256": sha256.lower(),
         }
     raise ValueError(f"不支持的 workspace.v1 操作: {action}")
+
+
+def _validate_system_observe_result(action: str, result: dict[str, Any]) -> dict[str, Any]:
+    observed_at = result.get("observed_at")
+    observed_at_unix = result.get("observed_at_unix")
+    if (
+        not isinstance(observed_at, str)
+        or len(observed_at) > 64
+        or not observed_at.endswith("Z")
+        or not isinstance(observed_at_unix, (int, float))
+        or isinstance(observed_at_unix, bool)
+    ):
+        raise ValueError("Agent 返回的 system_observe observed_at 无效")
+
+    if action == "get_host_info":
+        required = ("os", "system", "release", "version", "architecture", "hostname", "python")
+        if any(not isinstance(result.get(field), str) for field in required):
+            raise ValueError("Agent 返回的 system_observe host_info 字段无效")
+        pid = result.get("pid")
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid < 0:
+            raise ValueError("Agent 返回的 system_observe pid 无效")
+        _validate_system_observe_host_metadata(result)
+        return dict(result)
+
+    if action == "get_resources":
+        cpu = result.get("cpu")
+        disks = result.get("disks")
+        if not isinstance(cpu, dict) or not isinstance(disks, list) or len(disks) > 16:
+            raise ValueError("Agent 返回的 system_observe resources 字段无效")
+        logical_count = cpu.get("logical_count")
+        if logical_count is not None and (
+            not isinstance(logical_count, int) or isinstance(logical_count, bool) or logical_count < 1
+        ):
+            raise ValueError("Agent 返回的 system_observe cpu 字段无效")
+        if not isinstance(result.get("memory"), (dict, type(None))):
+            raise ValueError("Agent 返回的 system_observe memory 字段无效")
+        for disk in disks:
+            if not isinstance(disk, dict):
+                raise ValueError("Agent 返回的 system_observe disk 字段无效")
+            if any(
+                not isinstance(disk.get(field), int)
+                or isinstance(disk.get(field), bool)
+                or disk.get(field) < 0
+                for field in ("total_bytes", "used_bytes", "free_bytes")
+            ):
+                raise ValueError("Agent 返回的 system_observe disk 字段无效")
+        return dict(result)
+
+    if action == "get_processes":
+        processes = result.get("processes")
+        if (
+            not isinstance(result.get("available"), bool)
+            or not isinstance(processes, list)
+            or len(processes) > 100
+            or not isinstance(result.get("truncated"), bool)
+        ):
+            raise ValueError("Agent 返回的 system_observe processes 字段无效")
+        for process in processes:
+            if (
+                not isinstance(process, dict)
+                or not isinstance(process.get("pid"), int)
+                or isinstance(process.get("pid"), bool)
+                or not isinstance(process.get("name"), str)
+            ):
+                raise ValueError("Agent 返回的 system_observe process 摘要无效")
+        return dict(result)
+
+    if action == "get_network":
+        interfaces = result.get("interfaces")
+        addresses = result.get("addresses")
+        if (
+            not isinstance(result.get("hostname"), str)
+            or not isinstance(interfaces, list)
+            or len(interfaces) > 128
+            or not isinstance(addresses, list)
+            or len(addresses) > 128
+            or not all(isinstance(address, str) and len(address) <= 128 for address in addresses)
+        ):
+            raise ValueError("Agent 返回的 system_observe network 字段无效")
+        for interface in interfaces:
+            if (
+                not isinstance(interface, dict)
+                or not isinstance(interface.get("index"), int)
+                or isinstance(interface.get("index"), bool)
+                or not isinstance(interface.get("name"), str)
+            ):
+                raise ValueError("Agent 返回的 system_observe interface 摘要无效")
+        _validate_system_observe_tcp_listeners(result.get("tcp_listeners"))
+        return dict(result)
+
+    raise ValueError(f"不支持的 system_observe.v1 操作: {action}")
+
+
+def _validate_system_observe_host_metadata(result: dict[str, Any]) -> None:
+    if "privileges" in result:
+        privileges = result["privileges"]
+        if (
+            not isinstance(privileges, dict)
+            or set(privileges) != {"is_admin", "is_root"}
+            or any(flag is not None and not isinstance(flag, bool) for flag in privileges.values())
+        ):
+            raise ValueError("Agent 返回的 system_observe privileges 无效")
+
+    distribution = result.get("linux_distribution")
+    if distribution is not None:
+        if not isinstance(distribution, dict) or set(distribution) != {"id", "version_id"}:
+            raise ValueError("Agent 返回的 system_observe linux_distribution 无效")
+        distribution_id, version_id = distribution["id"], distribution["version_id"]
+        if not _is_os_release_id(distribution_id) or (version_id is not None and not _is_os_release_id(version_id)):
+            raise ValueError("Agent 返回的 system_observe linux_distribution 无效")
+
+    if "linux_tools" in result:
+        tools = result["linux_tools"]
+        if (
+            not isinstance(tools, dict)
+            or set(tools) != {"sudo_on_path", "docker_on_path", "podman_on_path"}
+            or not all(isinstance(found, bool) for found in tools.values())
+        ):
+            raise ValueError("Agent 返回的 system_observe linux_tools 无效")
+
+
+def _is_os_release_id(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[a-z0-9._-]{1,64}", value) is not None
+
+
+def _validate_system_observe_tcp_listeners(listeners: object) -> None:
+    if listeners is None:
+        return
+    if not isinstance(listeners, dict) or set(listeners) != {"ports", "truncated"}:
+        raise ValueError("Agent 返回的 system_observe tcp_listeners 无效")
+    ports = listeners["ports"]
+    truncated = listeners["truncated"]
+    if (
+        not isinstance(ports, list)
+        or len(ports) > 128
+        or not all(type(port) is int and 1 <= port <= 65535 for port in ports)
+        or ports != sorted(set(ports))
+        or not isinstance(truncated, bool)
+        or (truncated and len(ports) != 128)
+    ):
+        raise ValueError("Agent 返回的 system_observe tcp_listeners 无效")
